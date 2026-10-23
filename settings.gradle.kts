@@ -1,4 +1,19 @@
-pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
-dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+// Зеркало Maven Central от Google стоит первым: у GitHub-раннеров Central иногда отвечает 403.
+pluginManagement {
+    repositories {
+        google()
+        maven(url = "https://maven-central.storage-download.googleapis.com/maven2/")
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        maven(url = "https://maven-central.storage-download.googleapis.com/maven2/")
+        mavenCentral()
+    }
+}
 rootProject.name = "IA-Android-17"
 include(":app")
