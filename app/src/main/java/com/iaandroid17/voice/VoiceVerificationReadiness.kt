@@ -1,26 +1,32 @@
 package com.iaandroid17.voice
 
 import android.content.Context
-import android.media.MediaMetadataRetriever
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.math.max
 
-/** Enrollment sanity checks and attempt budget. This is not voice biometrics or spoof detection. */
+/** Recording-quality/attempt controls. Signal checks are not speaker identity or anti-spoof proof. */
 object VoiceVerificationReadiness {
     data class Quality(val accepted: Boolean, val durationMs: Long, val bytes: Long, val estimatedBytesPerSecond: Long, val reason: String)
 
+    /** Inspects controlled raw PCM16 mono 16 kHz samples produced by PcmAudioCapture. */
     fun inspectRecording(file: File): Quality {
         val size = file.length()
-        if (!file.exists() || size < 4096L) return Quality(false, 0, size, 0, "Запись пуста или слишком короткая.")
-        val retriever = MediaMetadataRetriever()
-        val duration = try {
-            retriever.setDataSource(file.absolutePath)
-            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-        } catch (_: Exception) { 0L } finally { runCatching { retriever.release() } }
-        if (duration !in 1800L..12000L) return Quality(false, duration, size, 0, "Длительность должна быть от 2 до 12 секунд.")
+        if (!file.exists() || size < 64_000L) return Quality(false, 0, size, 0, "Запись короче двух секунд или отсутствует.")
+        if (size % 2L != 0L) return Quality(false, 0, size, 0, "Неверный размер PCM-файла.")
+        val bytes = runCatching { file.readBytes() }.getOrElse {
+            return Quality(false, 0, size, 0, "Не удалось прочитать PCM.")
+        }
+        val shorts = ShortArray(bytes.size / 2)
+        val buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        for (i in shorts.indices) shorts[i] = buf.short
+        val duration = shorts.size * 1000L / 16_000L
+        val report = AudioSignalQuality.inspectPcm16(shorts)
+        if (duration !in 2000L..12_000L) return Quality(false, duration, size, size * 1000L / max(1L, duration), "Длительность должна быть от 2 до 12 секунд.")
         val rate = size * 1000L / max(1L, duration)
-        if (rate < 800L) return Quality(false, duration, size, rate, "Слишком мало аудиоданных. Повторите запись в тихом месте.")
-        return Quality(true, duration, size, rate, "Базовая проверка контейнера пройдена. Это не проверка чистоты сигнала и не доказательство личности.")
+        if (!report.accepted) return Quality(false, duration, size, rate, report.reason)
+        return Quality(true, duration, size, rate, "PCM 16 кГц проверен: RMS %.4f, peak %.3f, clipping %.3f%%. Это проверка качества уровня, не идентификация человека и не anti-spoof.".format(report.rms, report.peak, report.clippedFraction * 100))
     }
 
     /** Sliding-window denial budget. */
