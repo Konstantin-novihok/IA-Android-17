@@ -80,8 +80,8 @@ object SafeArchiveReader {
 
     /** Reject traversal, absolute paths, drive prefixes and ambiguous empty segments. */
     internal fun normalizePath(path: String): String? {
-        if (path.isBlank() || path.startsWith('/') || path.startsWith('\\\\')) return null
-        if (path.contains('\\\\')) return null
+        if (path.isBlank() || path.startsWith('/') || path.startsWith("\\")) return null
+        if (path.contains("\\")) return null
         val parts = path.split('/')
         if (parts.any { it.isEmpty() || it == "." || it == ".." }) return null
         if (parts.first().contains(':')) return null
