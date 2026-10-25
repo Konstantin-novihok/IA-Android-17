@@ -3,7 +3,7 @@
 ## Components added
 
 - PAD model: SpeechAntiSpoofingBenchmarks/AASIST ONNX, MIT license, pinned SHA-256 in `AntiSpoofModelInstaller`.
-- Input contract: mono PCM16, 16 kHz; deterministic 64,600-sample window (~4.04 s), centered crop or zero-padding.
+- Input contract: mono PCM16, 16 kHz; deterministic first-64,600-sample window (~4.04 s); short clips are tiled to match the upstream padding routine.
 - Output contract: two class logits; index 0 = spoof, index 1 = bona fide, following the model card. The current 0.5 softmax operating point is provisional, not a calibrated security threshold.
 - Additional signal heuristics run after AASIST. Any rejection prevents speaker comparison for that attempt.
 - Chat speech output uses Android `TextToSpeech`; tap **Озвучить** on an assistant answer.
