@@ -51,7 +51,7 @@ class SpeakerEmbeddingEngine(context: Context) : Closeable {
 
         OnnxTensor.createTensor(env, FloatBuffer.wrap(flat), longArrayOf(1, frames.size.toLong(), 80L)).use { input ->
             session.run(mapOf("x" to input)).use { result ->
-                val value = result.get(0).get().value
+                val value = result.get("embedding").orElseThrow().value
                 @Suppress("UNCHECKED_CAST")
                 val vector = (value as Array<FloatArray>).firstOrNull()
                     ?: error("Model returned an empty embedding")
