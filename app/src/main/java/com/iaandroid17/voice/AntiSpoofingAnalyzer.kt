@@ -38,7 +38,7 @@ object AntiSpoofingAnalyzer {
             "Anti-spoof expects 2–12 seconds of raw PCM16 mono at 16 kHz"
         }
         val b = ByteBuffer.wrap(pcm16).order(ByteOrder.LITTLE_ENDIAN)
-        val x = ShortArray(pcm16.size / 2) { b.short.toInt() }
+        val x = ShortArray(pcm16.size / 2) { b.short }
         val rms = sqrt(x.sumOf { it.toDouble() * it } / x.size) / 32768.0
         val clipped = x.count { abs(it.toInt()) >= 32760 }.toFloat() / x.size
         val frame = 320 // 20 ms at 16 kHz
