@@ -90,7 +90,7 @@ fun ChatScreen(vm: AppViewModel, onOpenSettings: () -> Unit) {
             contentPadding = PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(vm.messages.asReversed(), key = { it.id }) { m -> MessageBubble(m, onSpeak = { text -> if (ttsReady) { tts.language = Locale.getDefault(); tts.speak(text.take(6000), TextToSpeech.QUEUE_FLUSH, null, "ia-chat") } else vm.banner = "Синтез речи недоступен: проверьте TTS-движок Android." }) }
+            items(vm.messages.asReversed(), key = { it.id }) { m -> MessageBubble(m, onSpeak = { text -> if (ttsReady) { val locale = Locale.getDefault(); if (tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE) { tts.language = locale; tts.speak(text.take(6000), TextToSpeech.QUEUE_FLUSH, null, "ia-chat") } else vm.banner = "TTS не поддерживает язык " + locale.toLanguageTag() + "; установите голосовые данные в настройках Android." } else vm.banner = "Синтез речи недоступен: проверьте TTS-движок Android." }) }
             if (vm.messages.isEmpty()) {
                 item(key = "hint") { EmptyHint() }
             }
