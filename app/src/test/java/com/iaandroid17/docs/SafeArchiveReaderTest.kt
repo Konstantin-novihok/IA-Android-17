@@ -52,4 +52,23 @@ class SafeArchiveReaderTest {
             assertTrue(expected.message!!.contains("много файлов"))
         }
     }
+
+    @Test fun rejectsAbsoluteAndAmbiguousPaths() {
+        val items = SafeArchiveReader.readZip(
+            archive("/root.txt" to "x", "C:/drive.txt" to "y", "a//b.txt" to "z", "valid.txt" to "ok")
+        )
+        assertEquals(listOf("valid.txt"), items.map { it.path })
+    }
+
+    @Test fun enforcesExpandedPerEntryAndAggregateLimits() {
+        try {
+            SafeArchiveReader.readZip(
+                archive("a.txt" to "12345", "b.txt" to "67890"),
+                SafeArchiveReader.Limits(maxEntryBytes = 8, maxTotalBytes = 9)
+            )
+            fail("expected IOException")
+        } catch (expected: java.io.IOException) {
+            assertTrue(expected.message!!.contains("лимит") || expected.message!!.contains("превышает"))
+        }
+    }
 }
