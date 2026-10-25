@@ -49,7 +49,7 @@ object SafeArchiveReader {
                 if (declared > limits.maxEntryBytes)
                     throw IOException("Файл внутри архива превышает лимит: $safePath")
                 if (declared > 0 && compressed > 0 &&
-                    declared / compressed.coerceAtLeast(1) > limits.maxCompressionRatio)
+                    declared.toDouble() / compressed.toDouble() > limits.maxCompressionRatio)
                     throw IOException("Подозрительная степень сжатия: $safePath")
 
                 val out = ByteArrayOutputStream()
@@ -67,8 +67,8 @@ object SafeArchiveReader {
                     out.write(buf, 0, n)
                 }
                 // Also enforce ratio when metadata was absent/unreliable.
-                val ratio = entryBytes.toLong() / compressed.coerceAtLeast(1)
-                if (entryBytes > 1024 * 1024 && ratio > limits.maxCompressionRatio)
+                val ratio = if (compressed > 0) entryBytes.toDouble() / compressed.toDouble() else 0.0
+                if (entryBytes > 1024 * 1024 && compressed > 0 && ratio > limits.maxCompressionRatio)
                     throw IOException("Подозрительная степень сжатия: $safePath")
                 result.add(Entry(safePath, out.toByteArray()))
                 zip.closeEntry()
