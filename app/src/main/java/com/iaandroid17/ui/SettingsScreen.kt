@@ -2,6 +2,8 @@ package com.iaandroid17.ui
 
 import android.content.Intent
 import android.media.MediaRecorder
+import android.hardware.biometrics.BiometricPrompt
+import android.os.CancellationSignal
 import com.iaandroid17.voice.OwnerVoiceProfile
 import android.Manifest
 import android.content.pm.PackageManager
@@ -250,7 +252,7 @@ fun SettingsScreen(vm: AppViewModel) {
         // ---------- Голосовой профиль владельца ----------
         Section("Голосовой профиль владельца") {
             Text("Записано образцов: $samples из 3. Записи хранятся только на устройстве в зашифрованном виде (AES-GCM, Android Keystore).", style = MaterialTheme.typography.bodySmall)
-            Text("Важно: speaker verification/Voice ID ещё не подключён. Эти образцы не подтверждают личность, поэтому нельзя считать команды защищёнными от записи или синтеза голоса.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            Text("Статус: speaker embedding, сравнение сходства, калибруемый порог, контроль качества сигнала и anti-spoof пока НЕ реализованы. Зашифрованные записи — лишь материал регистрации. Сценарии заблокированы до внедрения и проверки валидатора. Подделка голоса всё ещё может обходить голосовые проверки.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             if (recordingSlot == null && samples < 3) {
                 Button(onClick = { enrollmentMicPermission.launch(Manifest.permission.RECORD_AUDIO) }) { Text("Записать образец ${samples + 1} из 3") }
             }
@@ -290,7 +292,7 @@ fun SettingsScreen(vm: AppViewModel) {
             if (samples == 3) Text("Три образца собраны. Это не означает, что Voice ID уже работает.", style = MaterialTheme.typography.bodyMedium)
             if (profileNotice.isNotBlank()) Text(profileNotice, style = MaterialTheme.typography.bodySmall)
             if (samples > 0) OutlinedButton(onClick = { askDeleteVoiceProfile = true }) { Text("Удалить профиль и образцы") }
-            Text("Перерегистрация: удалите текущий профиль и запишите три новых образца.", style = MaterialTheme.typography.labelSmall)
+            Text("Перерегистрация требует системного подтверждения владельца. Шифрование образцов не подтверждает личность.", style = MaterialTheme.typography.labelSmall)
         }
         if (askDeleteVoiceProfile) {
             AlertDialog(
@@ -298,11 +300,32 @@ fun SettingsScreen(vm: AppViewModel) {
                 title = { Text("Удалить голосовой профиль?") },
                 text = { Text("Будут удалены образцы и ключ шифрования. Это необратимо.") },
                 confirmButton = { TextButton(onClick = {
-                    ownerProfile.deleteProfile()
-                    samples = 0
+                    val activity = context as? android.app.Activity
+                    if (Build.VERSION.SDK_INT >= 30 && activity != null) {
+                        val prompt = BiometricPrompt.Builder(context)
+                            .setTitle("Подтвердите владельца")
+                            .setSubtitle("Повторная регистрация голосового профиля")
+                            .setDescription("Подтвердите удаление старых голосовых образцов системной биометрией или PIN-кодом.")
+                            .setAllowedAuthenticators(BiometricPrompt.AUTHENTICATION_RESULT_TYPE_BIOMETRIC or BiometricPrompt.AUTHENTICATION_RESULT_TYPE_DEVICE_CREDENTIAL)
+                            .build()
+                        prompt.authenticate(CancellationSignal(), context.mainExecutor, object : BiometricPrompt.AuthenticationCallback() {
+                            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                                ownerProfile.deleteProfile()
+                                samples = 0
+                                profileNotice = "Профиль удалён после подтверждения владельца. Для повторной регистрации запишите новые образцы."
+                            }
+                            override fun onAuthenticationFailed() {
+                                profileNotice = "Проверка владельца не пройдена. Профиль сохранён."
+                            }
+                            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                                profileNotice = "Подтверждение отменено. Профиль сохранён."
+                            }
+                        })
+                    } else {
+                        profileNotice = "Не удалось запросить проверку владельца. Профиль сохранён."
+                    }
                     askDeleteVoiceProfile = false
-                    profileNotice = "Профиль удалён."
-                }) { Text("Удалить") } },
+                }) { Text("Подтвердить и удалить") },
                 dismissButton = { TextButton(onClick = { askDeleteVoiceProfile = false }) { Text("Отмена") } }
             )
         }
