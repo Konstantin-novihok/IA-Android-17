@@ -45,9 +45,14 @@ class VoiceScenarioService : Service(), TextToSpeech.OnInitListener {
             stopListeningAndExit()
             return START_NOT_STICKY
         }
+        // Fail closed: encrypted enrollment recordings are not speaker embeddings.
+        // No validated similarity threshold or anti-spoof verifier is shipped yet.
+        VoiceSecurityAudit.record(this, "voice_start_denied", "speaker verifier unavailable")
         startForeground(NOTIFICATION_ID, buildNotification())
-        beginRecognition()
-        return START_STICKY
+        speak("Голосовые команды заблокированы. Верификатор голоса владельца ещё не реализован. Доступен только чат.")
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+        return START_NOT_STICKY
     }
 
     private fun beginRecognition() {
