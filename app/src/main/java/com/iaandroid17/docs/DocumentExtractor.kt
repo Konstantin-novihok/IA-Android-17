@@ -174,10 +174,25 @@ object DocumentExtractor {
         val doc = PDDocument.load(input)
         try {
             val pages = doc.numberOfPages
-            val text = PDFTextStripper().getText(doc)
-            if (text.isBlank())
+            if (pages > 5000) throw IOException("PDF «$name» превышает безопасный лимит 5000 страниц")
+            val stripper = PDFTextStripper()
+            val result = StringBuilder()
+            var nonBlankPages = 0
+            for (page in 1..pages) {
+                stripper.startPage = page
+                stripper.endPage = page
+                val pageText = stripper.getText(doc).trim()
+                if (pageText.isEmpty()) continue
+                if (result.isNotEmpty()) result.append("\n\n")
+                result.append("[Страница PDF: ").append(page).append("]\n")
+                    .append(pageText)
+                nonBlankPages++
+                if (result.length >= MAX_TEXT_CHARS) break
+            }
+            if (nonBlankPages == 0)
                 throw IOException("В PDF «$name» нет текстового слоя (похоже на скан). Распознавание (OCR) пока не реализовано")
-            return finish(name, text, "PDF, страниц: $pages")
+            val note = "PDF, страниц: $pages; текст извлечён с указанием исходных страниц."
+            return finish(name, result.toString(), note)
         } finally {
             doc.close()
         }
