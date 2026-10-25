@@ -94,7 +94,16 @@ object AntiSpoofingAnalyzer {
         val hop = frameSize
         var total = 0.0
         var frames = 0
-        val nBins = 64
+        val nBins = 32
+        val window = DoubleArray(frameSize) { i ->
+            0.5 - 0.5 * kotlin.math.cos(2.0 * Math.PI * i / (frameSize - 1))
+        }
+        val cosTable = Array(nBins) { k -> DoubleArray(frameSize) { i ->
+            kotlin.math.cos(2.0 * Math.PI * k * i / frameSize)
+        } }
+        val sinTable = Array(nBins) { k -> DoubleArray(frameSize) { i ->
+            kotlin.math.sin(2.0 * Math.PI * k * i / frameSize)
+        } }
         var start = 0
         while (start + frameSize <= samples.size) {
             val power = DoubleArray(nBins)
@@ -102,11 +111,9 @@ object AntiSpoofingAnalyzer {
                 var re = 0.0
                 var im = 0.0
                 for (i in 0 until frameSize) {
-                    val window = 0.5 - 0.5 * kotlin.math.cos(2.0 * Math.PI * i / (frameSize - 1))
-                    val angle = 2.0 * Math.PI * k * i / frameSize
-                    val value = samples[start + i].toDouble() * window
-                    re += value * kotlin.math.cos(angle)
-                    im -= value * kotlin.math.sin(angle)
+                    val value = samples[start + i].toDouble() * window[i]
+                    re += value * cosTable[k][i]
+                    im -= value * sinTable[k][i]
                 }
                 power[k] = re * re + im * im + 1e-12
             }
