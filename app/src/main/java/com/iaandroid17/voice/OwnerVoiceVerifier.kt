@@ -29,7 +29,7 @@ object OwnerVoiceVerifier {
         require(candidate.size == SpeakerEmbeddingEngine.EMBEDDING_DIM) { "Неверная размерность голоса" }
         require(candidate.all { it.isFinite() }) { "Голосовой вектор содержит недопустимые значения" }
         require(enrolled.isNotEmpty()) { "Сначала извлеките embeddings из голосовых образцов" }
-        require(enrolled.all { it.size == candidate.size && it.all(Float::isFinite) }) {
+        require(enrolled.all { it.size == candidate.size && it.all { value -> value.isFinite() } }) {
             "Профиль владельца повреждён или имеет несовместимую размерность"
         }
         require(threshold in -1f..1f && threshold.isFinite()) { "Неверный порог сравнения" }
