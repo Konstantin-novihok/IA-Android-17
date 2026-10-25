@@ -114,7 +114,9 @@ class VoiceScenarioService : Service(), TextToSpeech.OnInitListener {
             else -> return
         }
         lastHandledAt = now
-        runScenario(number, s.scenarioPulseMs)
+        // Fail closed until a validated speaker verifier is integrated.
+        speak("Сценарий отменён. Проверка голоса владельца пока не подключена.")
+        return
     }
 
     /** Safe starter scenarios, independent from LLM output: time, date, service self-test. */
