@@ -6,6 +6,7 @@ import android.hardware.biometrics.BiometricManager
 import android.os.CancellationSignal
 import com.iaandroid17.voice.PcmAudioCapture
 import com.iaandroid17.voice.OwnerVoiceProfile
+import com.iaandroid17.voice.OwnerVoiceVerifier
 import com.iaandroid17.voice.VoiceSecurityAudit
 import com.iaandroid17.voice.VoiceVerificationReadiness
 import com.iaandroid17.voice.SpeakerEmbeddingEngine
