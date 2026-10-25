@@ -39,7 +39,8 @@ object SafeArchiveReader {
                 if (count > limits.maxEntries)
                     throw IOException("В архиве слишком много файлов (лимит ${limits.maxEntries})")
 
-                val safePath = normalizePath(item.name) ?: run {
+                val safePath = normalizePath(item.name)
+                if (safePath == null) {
                     zip.closeEntry()
                     continue
                 }
