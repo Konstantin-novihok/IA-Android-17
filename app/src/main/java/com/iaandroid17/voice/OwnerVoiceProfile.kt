@@ -8,6 +8,9 @@ import android.security.keystore.KeyProperties
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import kotlin.math.sqrt
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -33,28 +36,84 @@ class OwnerVoiceProfile(private val context: Context) {
         if (!file.exists()) return false
         val deleted = file.delete()
         if (deleted) {
+            embeddingFile(slot).delete()
             if (sampleCount == 0) prefs.edit().remove("label").apply()
             VoiceSecurityAudit.record(context, "enrollment_sample_deleted", "slot=$slot")
         }
         return deleted
     }
     private fun sampleFile(slot: Int): File = File(folder, "sample_$slot.bin")
+    private fun embeddingFile(slot: Int): File = File(folder, "embedding_$slot.bin")
     val registrationLabel: String get() = prefs.getString("label", "") ?: ""
 
     fun saveEnrollmentClip(slot: Int, pcmOrContainer: ByteArray) {
         require(slot in 1..3)
         require(pcmOrContainer.size in 64_000..384_000) { "Ожидается PCM16 mono 16 кГц длительностью 2–12 секунд" }
         require(!hasSample(slot)) { "Слот $slot уже занят. Сначала удалите этот образец." }
+        writeEncrypted(sampleFile(slot), pcmOrContainer)
+        embeddingFile(slot).delete()
+        prefs.edit().putString("label", "Владелец").apply()
+        VoiceSecurityAudit.record(context, "enrollment_sample_saved", "slot=$slot; material only, not verified identity")
+    }
+
+
+
+    /** Decrypts an enrolled raw PCM16 clip only for on-device feature extraction. */
+    fun readEnrollmentClip(slot: Int): ByteArray {
+        require(slot in 1..3 && hasSample(slot)) { "Голосовой образец отсутствует" }
+        return readEncrypted(sampleFile(slot))
+    }
+
+    /** Stores a real model output encrypted with the same device-keystore AES-GCM key. */
+    fun saveEmbedding(slot: Int, embedding: FloatArray) {
+        require(slot in 1..3 && hasSample(slot)) { "Сначала сохраните голосовой образец" }
+        require(embedding.size == 512 && embedding.all { it.isFinite() }) { "Ожидается embedding размерности 512" }
+        val norm = sqrt(embedding.sumOf { it.toDouble() * it })
+        require(norm in 0.98..1.02) { "Embedding должен быть L2-нормализован" }
+        val bytes = ByteBuffer.allocate(4 + embedding.size * 4).order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(embedding.size).apply { embedding.forEach { putFloat(it) } }.array()
+        writeEncrypted(embeddingFile(slot), bytes)
+        VoiceSecurityAudit.record(context, "speaker_embedding_saved", "slot=$slot; dim=512; encrypted")
+    }
+
+    fun hasEmbedding(slot: Int): Boolean =
+        slot in 1..3 && embeddingFile(slot).isFile && embeddingFile(slot).length() > 32L
+
+    fun readEmbedding(slot: Int): FloatArray {
+        require(hasEmbedding(slot)) { "Embedding для образца $slot отсутствует" }
+        val bytes = readEncrypted(embeddingFile(slot))
+        require(bytes.size == 4 + 512 * 4) { "Повреждённый embedding-профиль" }
+        val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        require(buffer.int == 512) { "Неизвестная размерность embedding" }
+        val vector = FloatArray(512) { buffer.float }
+        require(vector.all { it.isFinite() }) { "Embedding содержит недопустимые значения" }
+        val norm = sqrt(vector.sumOf { it.toDouble() * it })
+        require(norm in 0.98..1.02) { "Embedding имеет неверную норму" }
+        return vector
+    }
+
+    private fun writeEncrypted(file: File, plaintext: ByteArray) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
-        val encrypted = cipher.doFinal(pcmOrContainer)
-        FileOutputStream(sampleFile(slot)).use { out ->
+        val encrypted = cipher.doFinal(plaintext)
+        FileOutputStream(file).use { out ->
             out.write(byteArrayOf(cipher.iv.size.toByte()))
             out.write(cipher.iv)
             out.write(encrypted)
+            out.fd.sync()
         }
-        prefs.edit().putString("label", "Владелец").apply()
-        VoiceSecurityAudit.record(context, "enrollment_sample_saved", "slot=$slot; material only, not verified identity")
+    }
+
+    private fun readEncrypted(file: File): ByteArray {
+        val packed = file.readBytes()
+        require(packed.size > 1) { "Зашифрованный файл пуст" }
+        val ivLength = packed[0].toInt() and 0xff
+        require(ivLength in 12..16 && packed.size > 1 + ivLength) { "Неверный формат зашифрованного файла" }
+        val iv = packed.copyOfRange(1, 1 + ivLength)
+        val payload = packed.copyOfRange(1 + ivLength, packed.size)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, iv))
+        return cipher.doFinal(payload)
     }
 
     /** Explicit user reset erases encrypted exemplars and the local key. */
