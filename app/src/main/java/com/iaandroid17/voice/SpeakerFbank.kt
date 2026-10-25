@@ -4,6 +4,7 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.ln
 import kotlin.math.max
+import kotlin.math.pow
 import kotlin.math.sin
 
 /**
@@ -19,7 +20,7 @@ internal class SpeakerFbank {
     private val frameShift = 160
     private val fftSize = 512
     private val window = DoubleArray(frameLength) { i ->
-        (0.5 - 0.5 * cos(2.0 * PI * i / (frameLength - 1))).let { kotlin.math.pow(it, 0.85) }
+        (0.5 - 0.5 * cos(2.0 * PI * i / (frameLength - 1))).let { it.pow(0.85) }
     }
     private val filters = buildFilters()
 
