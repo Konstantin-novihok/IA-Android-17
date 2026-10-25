@@ -291,8 +291,10 @@ fun SettingsScreen(vm: AppViewModel) {
                     profileNotice = "Запись отменена."
                 }) { Text("Отменить") }
             }
-            if (samples == 3) Text("Три образца собраны. Это не означает, что Voice ID уже работает.", style = MaterialTheme.typography.bodyMedium)
+            if (samples == 3) Text("Три образца собраны. Профиль ещё не допущен к авторизации команд.", style = MaterialTheme.typography.bodyMedium)
             if (profileNotice.isNotBlank()) Text(profileNotice, style = MaterialTheme.typography.bodySmall)
+            Text("Последние события безопасности:", style = MaterialTheme.typography.titleSmall)
+            VoiceSecurityAudit.snapshot(context).takeLast(8).asReversed().forEach { Text(it, style = MaterialTheme.typography.labelSmall) }
             if (samples > 0) OutlinedButton(onClick = { askDeleteVoiceProfile = true }) { Text("Удалить профиль и образцы") }
             Text("Перерегистрация требует системного подтверждения владельца. Шифрование образцов не подтверждает личность.", style = MaterialTheme.typography.labelSmall)
         }
