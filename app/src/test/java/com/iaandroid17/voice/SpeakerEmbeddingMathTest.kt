@@ -13,7 +13,7 @@ class SpeakerEmbeddingMathTest {
 
     @Test fun averageIsUnitLength() {
         val mean = SpeakerEmbeddingMath.normalizedMean(listOf(floatArrayOf(1f, 0f), floatArrayOf(0.9f, 0.1f)))
-        assertEquals(1f, kotlin.math.sqrt(mean.fold(0.0) { acc, v -> acc + v.toDouble() * v.toDouble() }), 1e-5f)
+        assertEquals(1.0, kotlin.math.sqrt(mean.fold(0.0) { acc, v -> acc + v.toDouble() * v.toDouble() }), 1e-5)
         assertTrue(mean[0] > mean[1])
     }
 
