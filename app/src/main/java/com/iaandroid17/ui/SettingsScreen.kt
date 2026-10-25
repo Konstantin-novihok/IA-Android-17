@@ -6,6 +6,7 @@ import android.hardware.biometrics.BiometricPrompt
 import android.hardware.biometrics.BiometricManager
 import android.os.CancellationSignal
 import com.iaandroid17.voice.OwnerVoiceProfile
+import com.iaandroid17.voice.VoiceSecurityAudit
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -253,7 +254,7 @@ fun SettingsScreen(vm: AppViewModel) {
         // ---------- Голосовой профиль владельца ----------
         Section("Голосовой профиль владельца") {
             Text("Записано образцов: $samples из 3. Записи хранятся только на устройстве в зашифрованном виде (AES-GCM, Android Keystore).", style = MaterialTheme.typography.bodySmall)
-            Text("Статус: speaker embedding, сравнение сходства, калибруемый порог, контроль качества сигнала и anti-spoof пока НЕ реализованы. Зашифрованные записи — лишь материал регистрации. Сценарии заблокированы до внедрения и проверки валидатора. Подделка голоса всё ещё может обходить голосовые проверки.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            Text("РЕЖИМ: ТОЛЬКО ЧАТ. Голосовой запуск и команды отключены даже при разблокированном экране до интеграции и проверки верификатора владельца. Speaker embedding: нет. Сравнение: нет. Порог: не откалиброван. Проверка качества: нет. Anti-spoof: нет. Повторная регистрация с системным подтверждением владельца: есть. Локальный журнал: добавлен; ограничитель попыток ещё не интегрирован.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             if (recordingSlot == null && samples < 3) {
                 Button(onClick = { enrollmentMicPermission.launch(Manifest.permission.RECORD_AUDIO) }) { Text("Записать образец ${samples + 1} из 3") }
             }
