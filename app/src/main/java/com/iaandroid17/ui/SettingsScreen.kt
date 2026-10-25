@@ -632,7 +632,7 @@ fun SettingsScreen(vm: AppViewModel) {
                         verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 },
-                enabled = !verificationBusy && samples == 3 && ownerProfile.sampleSlots.all { ownerProfile.hasEmbedding(it) } && embeddingModelReady
+                enabled = !verificationBusy && samples == 3 && ownerProfile.sampleSlots.all { ownerProfile.hasEmbedding(it) } && embeddingModelReady && padReady
             ) {
                 Text(when {
                     verificationBusy -> "Проверка…"
@@ -674,14 +674,14 @@ fun SettingsScreen(vm: AppViewModel) {
                         pendingCalibrationSameSpeaker = true
                         verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO)
                     },
-                    enabled = !verificationBusy && verificationCapture == null && samples == 3 && ownerProfile.sampleSlots.all { ownerProfile.hasEmbedding(it) } && embeddingModelReady
+                    enabled = !verificationBusy && verificationCapture == null && samples == 3 && ownerProfile.sampleSlots.all { ownerProfile.hasEmbedding(it) } && embeddingModelReady && padReady
                 ) { Text("Записать мой голос") }
                 OutlinedButton(
                     onClick = {
                         pendingCalibrationSameSpeaker = false
                         verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO)
                     },
-                    enabled = !verificationBusy && verificationCapture == null && samples == 3 && ownerProfile.sampleSlots.all { ownerProfile.hasEmbedding(it) } && embeddingModelReady
+                    enabled = !verificationBusy && verificationCapture == null && samples == 3 && ownerProfile.sampleSlots.all { ownerProfile.hasEmbedding(it) } && embeddingModelReady && padReady
                 ) { Text("Записать другого") }
             }
             val calibration = remember(calibrationRevision) { calibrationStore.report() }
