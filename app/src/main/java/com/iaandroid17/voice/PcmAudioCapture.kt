@@ -47,10 +47,15 @@ class PcmAudioCapture {
             try {
                 BufferedOutputStream(FileOutputStream(checkNotNull(target))).use { out ->
                     val buffer = ByteArray(4096)
-                    while (active.get()) {
-                        val n = recorder.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
-                        if (n > 0) out.write(buffer, 0, n)
-                        else if (n < 0) {
+                    var written = 0
+                    while (active.get() && written < MAX_CAPTURE_BYTES) {
+                        val n = recorder.read(buffer, 0, minOf(buffer.size, MAX_CAPTURE_BYTES - written), AudioRecord.READ_BLOCKING)
+                        if (n > 0) {
+                            out.write(buffer, 0, n)
+                            written += n
+                            // Hard stop at 12 s of PCM16 mono 16 kHz; prevents unbounded cache/RAM use.
+                            if (written >= MAX_CAPTURE_BYTES) active.set(false)
+                        } else if (n < 0) {
                             failure = "AudioRecord read error: $n"
                             active.set(false)
                         }
@@ -87,5 +92,6 @@ class PcmAudioCapture {
         private const val SAMPLE_RATE = 16_000
         private const val CHANNEL = AudioFormat.CHANNEL_IN_MONO
         private const val ENCODING = AudioFormat.ENCODING_PCM_16BIT
+        private const val MAX_CAPTURE_BYTES = 12 * SAMPLE_RATE * 2
     }
 }
