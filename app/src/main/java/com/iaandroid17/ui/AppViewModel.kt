@@ -232,6 +232,55 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+
+    /** Serial installer for user-selected optional GGUF add-ons. */
+    fun downloadPackageSet(rawUrls: List<String>) {
+        if (download.running) return
+        val urls = rawUrls.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (urls.isEmpty()) { download = DownloadUi(message = "Добавьте HTTPS-ссылки на дополнительные GGUF-файлы."); return }
+        if (!settings.allowNetwork) { download = DownloadUi(message = "Сначала разрешите интернет в настройках."); return }
+        val invalid = urls.firstOrNull { !it.startsWith("https://", true) || !it.substringBefore('?').endsWith(".gguf", true) }
+        if (invalid != null) { download = DownloadUi(message = "Нужны HTTPS-ссылки на .gguf. Ошибка: " + invalid.take(100)); return }
+        downloadJob = viewModelScope.launch {
+            val doneNames = mutableListOf<String>()
+            val errors = mutableListOf<String>()
+            download = DownloadUi(running = true, message = "Подготовка комплекта: \${urls.size} файлов")
+            try {
+                urls.forEachIndexed { index, url ->
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    var name = models.fileNameFromUrl(url).replace(Regex("[^A-Za-z0-9._-]"), "_")
+                    if (!name.endsWith(".gguf", true)) name += ".gguf"
+                    if (models.list().any { it.name.equals(name, true) }) {
+                        doneNames += "$name (уже установлен)"
+                        return@forEachIndexed
+                    }
+                    val label = "[\${index + 1}/\${urls.size}] $name"
+                    try {
+                        download = DownloadUi(running = true, message = "$label — загрузка")
+                        val file = models.download(url, name) { d, t -> main.post { download = DownloadUi(true, d, t, "$label — загрузка") } }
+                        if (!models.isGguf(file)) { file.delete(); throw IOException("Файл не распознан как GGUF") }
+                        val expected = models.expectedSha256(url)
+                        if (expected != null) {
+                            download = DownloadUi(running = true, message = "$label — проверка SHA-256")
+                            val actual = models.sha256(file) { d, t -> main.post { download = DownloadUi(true, d, t, "$label — SHA-256") } }
+                            if (!expected.equals(actual, true)) { file.delete(); throw IOException("SHA-256 не совпал; файл удалён") }
+                        }
+                        doneNames += name
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { errors += "$name: \${e.message ?: e.javaClass.simpleName}" }
+                }
+                refreshModels()
+                if (settings.activeModel.isBlank() && modelFiles.isNotEmpty()) update { it.copy(activeModel = modelFiles.first().name) }
+                download = DownloadUi(message = "Комплект завершён. Установлено/уже было: \${doneNames.size}; ошибок: \${errors.size}." +
+                    if (errors.isEmpty()) "" else "\n" + errors.joinToString("\n").take(1300))
+            } catch (e: CancellationException) {
+                refreshModels()
+                download = DownloadUi(message = "Загрузка остановлена. Готовые файлы сохранены; текущую загрузку можно продолжить.")
+                throw e
+            } catch (e: Exception) { download = DownloadUi(message = "Ошибка комплекта: \${e.message ?: e.javaClass.simpleName}") }
+        }
+    }
+
     fun cancelDownload() { downloadJob?.cancel() }
 
     fun importModel(uri: Uri) {

@@ -216,6 +216,24 @@ fun SettingsScreen(vm: AppViewModel) {
             }
         }
 
+
+        Section("Дополнительные модели — комплектная загрузка") {
+            var packageUrls by rememberSaveable { mutableStateOf("") }
+            Text("Добавьте HTTPS-ссылки на дополнительные GGUF-файлы, по одной на строку. Очередь скачивает их последовательно, пропускает уже установленные файлы и проверяет GGUF. Для Hugging Face сверяется SHA-256, если доступна контрольная сумма.", style = MaterialTheme.typography.bodySmall)
+            OutlinedTextField(
+                value = packageUrls,
+                onValueChange = { packageUrls = it.take(12000) },
+                label = { Text("Ссылки на дополнительные .gguf") },
+                placeholder = { Text("https://…/model.gguf") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3,
+                maxLines = 7
+            )
+            Button(onClick = { vm.downloadPackageSet(packageUrls.lines().flatMap { it.split(Regex("\\s+")) }) },
+                enabled = !vm.download.running && packageUrls.isNotBlank()) { Text("Скачать комплект") }
+            Text("Скачаются выбранные вами GGUF-модели. Это пока не установщик всех модальностей: OCR, ASR и Voice ID требуют отдельных runtime и совместимых моделей, которые ещё не интегрированы. Не загружайте случайные веса.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+        }
+
         // ---------- Генерация и ресурсы ----------
         Section("Генерация и ресурсы") {
             Text("Лимит контекста: ${s.contextSize} токенов", style = MaterialTheme.typography.bodyMedium)
