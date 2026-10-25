@@ -22,10 +22,10 @@ class OwnerVoiceProfile(private val context: Context) {
     private val folder = File(context.noBackupFilesDir, "owner_voice").apply { mkdirs() }
     private val prefs = context.getSharedPreferences("owner_voice_profile", Context.MODE_PRIVATE)
 
-    val sampleSlots: List<Int> get() = (1..3).filter { sampleFile(it).isFile && sampleFile(it).length() > 0L }
+    val sampleSlots: List<Int> get() = VoiceEnrollmentSlots.occupied((1..3).filter { sampleFile(it).isFile && sampleFile(it).length() > 0L }.toSet())
     val sampleCount: Int get() = sampleSlots.size
     val isRegistered: Boolean get() = sampleCount == 3
-    fun nextAvailableSlot(): Int? = (1..3).firstOrNull { it !in sampleSlots }
+    fun nextAvailableSlot(): Int? = VoiceEnrollmentSlots.firstAvailable(sampleSlots.toSet())
     fun hasSample(slot: Int): Boolean = slot in 1..3 && sampleFile(slot).isFile && sampleFile(slot).length() > 0L
     fun deleteSample(slot: Int): Boolean {
         require(slot in 1..3) { "Номер образца должен быть 1..3" }
