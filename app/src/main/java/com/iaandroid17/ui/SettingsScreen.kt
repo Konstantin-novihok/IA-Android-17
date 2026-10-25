@@ -119,7 +119,7 @@ fun SettingsScreen(vm: AppViewModel) {
     var verificationNotice by remember { mutableStateOf("") }
     var pendingCalibrationSameSpeaker by remember { mutableStateOf<Boolean?>(null) }
     val calibrationStore = remember { VoiceCalibrationStore(context) }
-    var calibrationRevision by remember { mutableIntStateOf(0) }
+    var calibrationRevision by remember { mutableStateOf(0) }
     val modelCatalogStore = remember { DownloadModelCatalog(context) }
     var modelCatalog by remember { mutableStateOf(modelCatalogStore.list()) }
     var newModelName by remember { mutableStateOf("") }
@@ -342,7 +342,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 }
                 Button(
                     onClick = { vm.downloadPackageSet(modelCatalog.filter { it.enabled }.map { it.url }) },
-                    enabled = !vm.download.running && modelCatalog.any { it.enabled && it.url.startsWith("https://", true) && it.url.substringBefore('?').endsWith(".gguf", true) }
+                    enabled = !vm.download.running && modelCatalog.any { it.enabled } && modelCatalog.filter { it.enabled }.all { it.url.startsWith("https://", true) && it.url.substringBefore('?').endsWith(".gguf", true) }
                 ) { Text("Скачать выбранные модели") }
                 Text("Текущая загрузка: ${vm.download.message.ifBlank { "нет" }}", style = MaterialTheme.typography.bodySmall)
                 if (vm.download.running) {
@@ -621,7 +621,7 @@ fun SettingsScreen(vm: AppViewModel) {
                     enabled = !verificationBusy && verificationCapture == null && samples == 3 && ownerProfile.sampleSlots.all { ownerProfile.hasEmbedding(it) } && embeddingModelReady
                 ) { Text("Записать другого") }
             }
-            val calibration = calibrationStore.report()
+            val calibration = remember(calibrationRevision) { calibrationStore.report() }
             Text("Набор записей: владелец ${calibration.genuineCount}, другие люди ${calibration.impostorCount}", style = MaterialTheme.typography.bodyMedium)
             if (calibration.threshold != null) {
                 Text(
@@ -644,7 +644,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 "1. Запись PCM и базовые проверки сигнала" to "Доступно: длительность, уровень, clipping.",
                 "2. Обученная модель speaker embedding" to if (embeddingModelReady) "РЕАЛИЗОВАНО: CAM++ ONNX, 512-D, fbank + mean normalization, проверка SHA-256." else "ОЖИДАЕТ УСТАНОВКИ: модель ещё не загружена.",
                 "3. Шаблон профиля и сравнение голосов" to if (ownerProfile.sampleSlots.size == 3 && ownerProfile.sampleSlots.all { ownerProfile.hasEmbedding(it) }) "РЕАЛИЗОВАНО: сравнение живой записи с тремя CAM++ embeddings; предварительный порог 0,55, не авторизационный." else "НЕ ГОТОВО: нужны три сохранённых образца и embeddings.",
-                "4. Биометрическая калибровка FAR/FRR" to "НЕ ГОТОВО: нет размеченных измерений и подтверждённого порога.",
+                "4. Биометрическая калибровка FAR/FRR" to if (calibrationStore.report().threshold != null) "РЕАЛИЗОВАНО ЧАСТИЧНО: порог EER рассчитан по ${calibrationStore.report().genuineCount} записям владельца и ${calibrationStore.report().impostorCount} записям других людей; только исследовательский отчёт." else "СБОР ДАННЫХ: нужны настоящие размеченные записи владельца и других людей.",
                 "5. Защита от записи/синтеза (anti-spoof)" to "НЕ ГОТОВО: детектор и проверка живости отсутствуют.",
                 "6. Допуск голосовых команд" to "ЗАКРЫТ: команды отклоняются до независимой проверки всех этапов."
             ).forEach { (title, detail) ->
