@@ -1,6 +1,8 @@
 package com.iaandroid17.ui
 
 import android.content.Intent
+import android.media.MediaRecorder
+import com.iaandroid17.voice.OwnerVoiceProfile
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -80,6 +82,39 @@ fun SettingsScreen(vm: AppViewModel) {
     var toDelete by remember { mutableStateOf<File?>(null) }
     var showAbout by remember { mutableStateOf(false) }
     var listeningRequested by rememberSaveable { mutableStateOf(false) }
+    val ownerProfile = remember { OwnerVoiceProfile(context) }
+    var samples by remember { mutableStateOf(ownerProfile.sampleCount) }
+    var recordingSlot by remember { mutableStateOf<Int?>(null) }
+    var recorder by remember { mutableStateOf<MediaRecorder?>(null) }
+    var tempRecording by remember { mutableStateOf<File?>(null) }
+    var profileNotice by remember { mutableStateOf("") }
+    var askDeleteVoiceProfile by remember { mutableStateOf(false) }
+    val enrollmentMicPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            val slot = (samples + 1).coerceAtMost(3)
+            try {
+                val tmp = File(context.cacheDir, "owner-enroll-$slot.m4a")
+                val rec = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(context) else MediaRecorder()
+                rec.setAudioSource(MediaRecorder.AudioSource.MIC)
+                rec.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                rec.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                rec.setAudioSamplingRate(16000)
+                rec.setAudioEncodingBitRate(64000)
+                rec.setOutputFile(tmp.absolutePath)
+                rec.prepare()
+                rec.start()
+                tempRecording = tmp
+                recorder = rec
+                recordingSlot = slot
+                profileNotice = "Записывается образец $slot. Произнесите фразу и сохраните."
+            } catch (e: Exception) {
+                recorder?.release()
+                recorder = null
+                recordingSlot = null
+                profileNotice = "Не удалось начать запись: ${e.message ?: "ошибка микрофона"}"
+            }
+        } else profileNotice = "Для записи нужен доступ к микрофону."
+    }
     val voicePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
         val mic = granted[Manifest.permission.RECORD_AUDIO] == true || context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         if (mic) {
@@ -210,6 +245,66 @@ fun SettingsScreen(vm: AppViewModel) {
                 "Модель сначала «думает», ответ точнее, но намного дольше. Рассуждения можно раскрыть в чате.",
                 s.thinking
             ) { v -> vm.update { it.copy(thinking = v) } }
+        }
+
+        // ---------- Голосовой профиль владельца ----------
+        Section("Голосовой профиль владельца") {
+            Text("Записано образцов: $samples из 3. Записи хранятся только на устройстве в зашифрованном виде (AES-GCM, Android Keystore).", style = MaterialTheme.typography.bodySmall)
+            Text("Важно: speaker verification/Voice ID ещё не подключён. Эти образцы не подтверждают личность, поэтому нельзя считать команды защищёнными от записи или синтеза голоса.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            if (recordingSlot == null && samples < 3) {
+                Button(onClick = { enrollmentMicPermission.launch(Manifest.permission.RECORD_AUDIO) }) { Text("Записать образец ${samples + 1} из 3") }
+            }
+            if (recordingSlot != null) {
+                Text("Идёт запись образца $recordingSlot", style = MaterialTheme.typography.titleSmall)
+                Button(onClick = {
+                    try {
+                        recorder?.stop()
+                        recorder?.release()
+                        recorder = null
+                        val file = tempRecording
+                        val slot = recordingSlot
+                        if (file != null && slot != null && file.exists() && file.length() > 2048L) {
+                            ownerProfile.saveEnrollmentClip(slot, file.readBytes())
+                            samples = ownerProfile.sampleCount
+                            profileNotice = "Образец зашифрован и сохранён локально."
+                            file.delete()
+                        } else profileNotice = "Запись слишком короткая. Повторите."
+                    } catch (_: Exception) {
+                        profileNotice = "Не удалось сохранить. Повторите запись."
+                        tempRecording?.delete()
+                    } finally {
+                        recordingSlot = null
+                        tempRecording = null
+                    }
+                }) { Text("Сохранить образец") }
+                OutlinedButton(onClick = {
+                    runCatching { recorder?.stop() }
+                    recorder?.release()
+                    recorder = null
+                    recordingSlot = null
+                    tempRecording?.delete()
+                    tempRecording = null
+                    profileNotice = "Запись отменена."
+                }) { Text("Отменить") }
+            }
+            if (samples == 3) Text("Три образца собраны. Это не означает, что Voice ID уже работает.", style = MaterialTheme.typography.bodyMedium)
+            if (profileNotice.isNotBlank()) Text(profileNotice, style = MaterialTheme.typography.bodySmall)
+            if (samples > 0) OutlinedButton(onClick = { askDeleteVoiceProfile = true }) { Text("Удалить профиль и образцы") }
+            Text("Перерегистрация: удалите текущий профиль и запишите три новых образца.", style = MaterialTheme.typography.labelSmall)
+        }
+        if (askDeleteVoiceProfile) {
+            AlertDialog(
+                onDismissRequest = { askDeleteVoiceProfile = false },
+                title = { Text("Удалить голосовой профиль?") },
+                text = { Text("Будут удалены образцы и ключ шифрования. Это необратимо.") },
+                confirmButton = { TextButton(onClick = {
+                    ownerProfile.deleteProfile()
+                    samples = 0
+                    askDeleteVoiceProfile = false
+                    profileNotice = "Профиль удалён."
+                }) { Text("Удалить") } },
+                dismissButton = { TextButton(onClick = { askDeleteVoiceProfile = false }) { Text("Отмена") } }
+            )
         }
 
         // ---------- Оформление ----------
