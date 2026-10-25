@@ -20,11 +20,13 @@ object SpeakerEmbeddingModelInstaller {
 
     fun modelFile(context: Context) = File(context.noBackupFilesDir, MODEL_NAME)
 
-    fun isInstalled(context: Context): Boolean {
+    fun hasModelFile(context: Context): Boolean {
         val file = modelFile(context)
-        return file.isFile && file.length() in MIN_BYTES..MAX_BYTES &&
-            runCatching { sha256(file) == MODEL_SHA256 }.getOrDefault(false)
+        return file.isFile && file.length() in MIN_BYTES..MAX_BYTES
     }
+
+    fun isInstalled(context: Context): Boolean =
+        hasModelFile(context) && runCatching { sha256(modelFile(context)) == MODEL_SHA256 }.getOrDefault(false)
 
     /** Blocking I/O; invoke from Dispatchers.IO. A partial or unverified file is never installed. */
     fun download(context: Context) {
