@@ -7,9 +7,9 @@ This document distinguishes enrollment storage checks from authentication.
 | # | Capability | Status | Evidence / constraint |
 |---|---|---|---|
 | 1 | Speaker embedding extraction | NOT IMPLEMENTED | Profile stores encrypted AAC samples only; no runtime/model is integrated. |
-| 2 | Compare live voice with enrolled owner | NOT IMPLEMENTED | Command gate rejects all attempts. Recognition result is text-only and not an authenticated speaker signal. |
-| 3 | Decision threshold | NOT CALIBRATED | No model-specific score distributions, owner/non-owner validation corpus, or operating-point analysis. |
-| 4 | Recording quality | PARTIAL | Basic file/container duration, size and data rate checks exist. No waveform/RMS/clipping/SNR/VAD evaluation, nor calibrated noise/reverb criteria. |
+| 2 | Compare live voice with enrolled owner | NOT IMPLEMENTED; vector math only | `SpeakerEmbeddingMath` provides cosine similarity and normalized mean for tests/research. No embeddings are extracted from recordings, and no live speaker comparison exists. Command gate rejects all attempts. |
+| 3 | Decision threshold | NOT CALIBRATED; analysis utility added | `SpeakerEmbeddingMath.calibrate()` can calculate empirical FAR/FRR/EER estimate from labeled scores. No actual model scores or independent evaluation corpus exist, so no threshold is approved. Utility is not wired to authorization. |
+| 4 | Recording quality | PARTIAL; PCM diagnostics utility added | `AudioSignalQuality.inspectPcm16()` estimates duration sufficiency, RMS, peak, clipping fraction, and zero-crossing rate for signed PCM16 mono/16 kHz. It is not connected to MediaRecorder enrollment and does not measure true SNR, VAD accuracy or reverberation. |
 | 5 | Replay/synthetic speech detection | NOT IMPLEMENTED | No anti-spoof model or trusted capture path. Name/code checks are not liveness. |
 | 6 | Owner-confirmed re-enrollment | IMPLEMENTED WITH LIMITS | Deletion uses Android system biometric/device credential confirmation; re-enrollment begins after old profile is erased. Confirm this flow on target Android devices. |
 | 7 | Audit and repeated-attempt protection | PARTIAL | Local bounded event log, sliding failure budget/cooldown, audit events for denied activation. Not tamper-resistant; app data reset clears it. |
@@ -51,3 +51,13 @@ Protected scenarios remain denied until all are complete:
 8. Tests and review pass; only then can protected scenarios be explicitly enabled.
 
 Voice verification is not a substitute for Android device credentials for actions that could disclose private data, send messages, make payments, or change security settings.
+
+
+## Added testable utilities (not authentication features)
+
+- `SpeakerEmbeddingMath.kt`: cosine similarity, normalized mean, empirical threshold analysis from labeled scores.
+- `AudioSignalQuality.kt`: preliminary PCM16 waveform metrics.
+- JVM tests cover basic vector geometry/calibration input and simple waveform quality cases.
+- Workflow now runs `:app:testDebugUnitTest` before building APK.
+
+These utilities do not constitute a deployed speaker embedding model, liveness detector, or calibrated biometric authentication. A passing unit test only validates code behavior on synthetic data.
