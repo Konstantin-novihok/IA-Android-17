@@ -4,6 +4,7 @@
     <queries>
         <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
         <intent><action android:name="android.speech.RecognitionService" /></intent>
+        <intent><action android:name="android.speech.action.RECOGNIZE_SPEECH" /></intent>
     </queries>
 
     <!-- Интернет нужен только для загрузки модели; в приложении есть переключатель, который его блокирует. -->
