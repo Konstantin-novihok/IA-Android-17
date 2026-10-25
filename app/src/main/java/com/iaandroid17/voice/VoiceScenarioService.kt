@@ -67,8 +67,7 @@ class VoiceScenarioService : Service(), TextToSpeech.OnInitListener {
                         override fun onEndOfSpeech() { listening = false }
                         override fun onError(error: Int) {
                             listening = false
-                            if (error != SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS &&
-                                error != SpeechRecognizer.ERROR_RECOGNIZER_BUSY) scheduleRestart()
+                            if (error != SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) scheduleRestart()
                         }
                         override fun onResults(results: android.os.Bundle?) {
                             listening = false
