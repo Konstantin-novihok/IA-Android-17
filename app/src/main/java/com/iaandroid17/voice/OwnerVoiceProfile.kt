@@ -38,6 +38,7 @@ class OwnerVoiceProfile(private val context: Context) {
             out.write(encrypted)
         }
         prefs.edit().putString("label", "Владелец").apply()
+        VoiceSecurityAudit.record(context, "enrollment_sample_saved", "slot=$slot; material only, not verified identity")
     }
 
     /** Explicit user reset erases encrypted exemplars and the local key. */
@@ -49,6 +50,7 @@ class OwnerVoiceProfile(private val context: Context) {
             val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
             ks.deleteEntry(KEY_ALIAS)
         } catch (_: Exception) { }
+        VoiceSecurityAudit.record(context, "owner_profile_deleted", "local voice enrollment reset")
     }
 
     private fun getOrCreateKey(): SecretKey {
