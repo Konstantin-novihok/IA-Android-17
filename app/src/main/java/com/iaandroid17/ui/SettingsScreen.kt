@@ -180,6 +180,8 @@ fun SettingsScreen(vm: AppViewModel) {
 
     val verificationMicPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (!granted) {
+            pendingPadAttack = null
+            pendingCalibrationSameSpeaker = null
             verificationNotice = "Проверка отменена: нет доступа к микрофону."
         } else {
             try {
@@ -692,7 +694,7 @@ fun SettingsScreen(vm: AppViewModel) {
             val padReport = remember(padEvaluationRevision) { padEvaluationStore.report() }
             Text("Набор PAD: живая речь ${padReport.genuineCount}, атаки ${padReport.attackCount}; FRR ${padReport.falseRejectRate?.let { "%.1f".format(java.util.Locale.US, it * 100) + "%" } ?: "н/д"}; FAR ${padReport.falseAcceptRate?.let { "%.1f".format(java.util.Locale.US, it * 100) + "%" } ?: "н/д"}", style = MaterialTheme.typography.bodySmall)
             Text(padReport.note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-            OutlinedButton(onClick = { padEvaluationStore.clear(); padEvaluationRevision++ }, enabled = padEvaluationRevision > 0 && !verificationBusy) { Text("Очистить тест PAD") }
+            OutlinedButton(onClick = { padEvaluationStore.clear(); padEvaluationRevision++ }, enabled = padReport.genuineCount + padReport.attackCount > 0 && !verificationBusy) { Text("Очистить тест PAD") }
             Text("Калибровка на настоящих записях", style = MaterialTheme.typography.titleSmall)
             Text("Собирайте независимые записи: свои фразы с меткой «Мой голос» и добровольно предоставленные записи другого человека с меткой «Другой человек». Аудио после расчёта удаляется; сохраняются только метка и score. Не используйте синтезированные/пересланные записи как замену полноценному anti-spoof тестированию.", style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
