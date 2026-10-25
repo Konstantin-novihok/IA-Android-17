@@ -196,6 +196,18 @@ fun SettingsScreen(vm: AppViewModel) {
             ) { v -> vm.update { it.copy(thinking = v) } }
         }
 
+        // ---------- Голосовые сценарии ----------
+        Section("Голосовые сценарии") {
+            Text("Длительность короткого вибросигнала: ${s.scenarioPulseMs} мс", style = MaterialTheme.typography.bodyMedium)
+            Slider(
+                value = s.scenarioPulseMs.toFloat(),
+                onValueChange = { v -> vm.update { it.copy(scenarioPulseMs = v.roundToInt().coerceIn(40, 400)) } },
+                valueRange = 40f..400f,
+                steps = 17
+            )
+            Text("Ползунок задаёт длительность одного импульса (40–400 мс). Количество импульсов сможет обозначать номер сценария. Сценарии и фоновое распознавание пока не подключены.", style = MaterialTheme.typography.labelSmall)
+        }
+
         // ---------- Безопасность ----------
         Section("Права доступа и безопасность") {
             Text(
