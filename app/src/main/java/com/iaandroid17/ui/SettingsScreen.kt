@@ -127,6 +127,7 @@ fun SettingsScreen(vm: AppViewModel) {
     var padBusy by remember { mutableStateOf(false) }
     var padNotice by remember { mutableStateOf("") }
     var pendingPadAttack by remember { mutableStateOf<Boolean?>(null) }
+    var pendingPadAttackKind by remember { mutableStateOf("replay") }
     val padEvaluationStore = remember { VoicePadEvaluationStore(context) }
     var padEvaluationRevision by remember { mutableStateOf(0) }
     var verificationBusy by remember { mutableStateOf(false) }
@@ -181,6 +182,7 @@ fun SettingsScreen(vm: AppViewModel) {
     val verificationMicPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (!granted) {
             pendingPadAttack = null
+            pendingPadAttackKind = "replay"
             pendingCalibrationSameSpeaker = null
             verificationNotice = "Проверка отменена: нет доступа к микрофону."
         } else {
@@ -196,7 +198,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 rec.start()
                 verificationFile = tmp
                 verificationCapture = rec
-                verificationNotice = when { pendingPadAttack != null -> "ТЕСТ PAD: " + (if (pendingPadAttack == true) "атака — воспроизведите TTS/запись/клонированный голос через отдельный динамик" else "живая речь непосредственно в микрофон") + ". После 4–12 секунд нажмите «Сравнить голос»."; pendingCalibrationSameSpeaker == null -> "Запись для проверки владельца идёт. Произнесите фразу 2–12 секунд, затем нажмите «Сравнить голос»."; else -> "Запись для калибровки идёт. Метка: " + (if (pendingCalibrationSameSpeaker == true) "мой голос" else "другой человек") + ". После записи нажмите «Сравнить голос»." }
+                verificationNotice = when { pendingPadAttack != null -> "ТЕСТ PAD (" + (if (pendingPadAttack == true) pendingPadAttackKind else "живая речь") + "): " + (if (pendingPadAttack == true) "воспроизведите тестовый звук через отдельный динамик" else "говорите непосредственно в микрофон") + ". После записи нажмите «Сравнить голос»."; pendingCalibrationSameSpeaker == null -> "Запись для проверки владельца идёт. Произнесите фразу 2–12 секунд, затем нажмите «Сравнить голос»."; else -> "Запись для калибровки идёт. Метка: " + (if (pendingCalibrationSameSpeaker == true) "мой голос" else "другой человек") + ". После записи нажмите «Сравнить голос»." }
             } catch (e: Exception) {
                 runCatching { verificationCapture?.release() }
                 verificationCapture = null
@@ -578,11 +580,11 @@ fun SettingsScreen(vm: AppViewModel) {
                                 )
                                 val attackLabel = pendingPadAttack
                                 if (attackLabel != null) {
-                                    padEvaluationStore.add(padResult.bonaFideScore, attackLabel)
+                                    padEvaluationStore.add(padResult.bonaFideScore, attackLabel, pendingPadAttackKind)
                                     padEvaluationRevision++
                                     val report = padEvaluationStore.report()
                                     VoiceSecurityAudit.record(context, "aasist_pad_test_trial", "label=${if (attackLabel) "attack" else "live"}; bonaFide=${"%.3f".format(java.util.Locale.US, padResult.bonaFideScore)}")
-                                    verificationNotice = "Тест PAD: ${if (attackLabel) "атака" else "живая речь"}, bona-fide score ${"%.3f".format(java.util.Locale.US, padResult.bonaFideScore)}; " +
+                                    verificationNotice = "Тест PAD (${if (attackLabel) pendingPadAttackKind else "живая речь"}): bona-fide score ${"%.3f".format(java.util.Locale.US, padResult.bonaFideScore)}; " +
                                         "решение ${if (padResult.suspicious) "ОТКЛОНЕНО" else "НЕ ОТКЛОНЕНО"}. Живых записей ${report.genuineCount}, атак ${report.attackCount}. " +
                                         "FRR ${report.falseRejectRate?.let { "%.1f".format(java.util.Locale.US, it * 100) + "%" } ?: "н/д"}; FAR ${report.falseAcceptRate?.let { "%.1f".format(java.util.Locale.US, it * 100) + "%" } ?: "н/д"}. " + report.note
                                     return@launch
@@ -642,6 +644,7 @@ fun SettingsScreen(vm: AppViewModel) {
                                 verificationFile = null
                                 verificationCapture = null
                                 pendingPadAttack = null
+                                pendingPadAttackKind = "replay"
                                 verificationBusy = false
                             }
                         }
@@ -688,11 +691,17 @@ fun SettingsScreen(vm: AppViewModel) {
             Text("Полевой тест обученного PAD", style = MaterialTheme.typography.titleSmall)
             Text("Проверяйте отдельно живую речь и воспроизведение через второй телефон/динамик. Для теста TTS, клонирования или voice conversion создайте/используйте аудио, на которое есть согласие. В тестовом режиме результат записывается даже если AASIST его отклоняет; аудио не сохраняется.", style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { pendingCalibrationSameSpeaker = null; pendingPadAttack = false; verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO) }, enabled = !verificationBusy && verificationCapture == null && padReady) { Text("Тест: живая речь") }
-                OutlinedButton(onClick = { pendingCalibrationSameSpeaker = null; pendingPadAttack = true; verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO) }, enabled = !verificationBusy && verificationCapture == null && padReady) { Text("Тест: replay / TTS / clone") }
+                OutlinedButton(onClick = { pendingCalibrationSameSpeaker = null; pendingPadAttack = false; pendingPadAttackKind = "live"; verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO) }, enabled = !verificationBusy && verificationCapture == null && padReady) { Text("Живая речь") }
+                OutlinedButton(onClick = { pendingCalibrationSameSpeaker = null; pendingPadAttack = true; pendingPadAttackKind = "replay"; verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO) }, enabled = !verificationBusy && verificationCapture == null && padReady) { Text("Replay") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { pendingCalibrationSameSpeaker = null; pendingPadAttack = true; pendingPadAttackKind = "tts"; verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO) }, enabled = !verificationBusy && verificationCapture == null && padReady) { Text("TTS") }
+                OutlinedButton(onClick = { pendingCalibrationSameSpeaker = null; pendingPadAttack = true; pendingPadAttackKind = "clone"; verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO) }, enabled = !verificationBusy && verificationCapture == null && padReady) { Text("Voice clone") }
+                OutlinedButton(onClick = { pendingCalibrationSameSpeaker = null; pendingPadAttack = true; pendingPadAttackKind = "conversion"; verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO) }, enabled = !verificationBusy && verificationCapture == null && padReady) { Text("Voice conversion") }
             }
             val padReport = remember(padEvaluationRevision) { padEvaluationStore.report() }
             Text("Набор PAD: живая речь ${padReport.genuineCount}, атаки ${padReport.attackCount}; FRR ${padReport.falseRejectRate?.let { "%.1f".format(java.util.Locale.US, it * 100) + "%" } ?: "н/д"}; FAR ${padReport.falseAcceptRate?.let { "%.1f".format(java.util.Locale.US, it * 100) + "%" } ?: "н/д"}", style = MaterialTheme.typography.bodySmall)
+            Text("По типам атак: " + listOf("replay", "tts", "clone", "conversion").joinToString { kind -> kind + "=" + padEvaluationStore.trials().count { it.attack && it.attackKind == kind } }, style = MaterialTheme.typography.labelSmall)
             Text(padReport.note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             OutlinedButton(onClick = { padEvaluationStore.clear(); padEvaluationRevision++ }, enabled = padReport.genuineCount + padReport.attackCount > 0 && !verificationBusy) { Text("Очистить тест PAD") }
             Text("Калибровка на настоящих записях", style = MaterialTheme.typography.titleSmall)
