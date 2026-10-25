@@ -184,7 +184,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 rec.start()
                 verificationFile = tmp
                 verificationCapture = rec
-                verificationNotice = if (pendingCalibrationSameSpeaker == null) "Запись для проверки владельца идёт. Произнесите фразу 2–12 секунд, затем нажмите «Сравнить голос»." else "Запись для калибровки идёт. Метка: " + if (pendingCalibrationSameSpeaker == true) "мой голос" else "другой человек" + ". После записи нажмите «Сравнить голос»."
+                verificationNotice = if (pendingCalibrationSameSpeaker == null) "Запись для проверки владельца идёт. Произнесите фразу 2–12 секунд, затем нажмите «Сравнить голос»." else "Запись для калибровки идёт. Метка: " + (if (pendingCalibrationSameSpeaker == true) "мой голос" else "другой человек") + ". После записи нажмите «Сравнить голос»."
             } catch (e: Exception) {
                 runCatching { verificationCapture?.release() }
                 verificationCapture = null
