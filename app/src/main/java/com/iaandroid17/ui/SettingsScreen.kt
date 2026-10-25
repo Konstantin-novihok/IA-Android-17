@@ -4,7 +4,10 @@ import android.content.Intent
 import android.hardware.biometrics.BiometricPrompt
 import android.hardware.biometrics.BiometricManager
 import android.os.CancellationSignal
-import com.iaandroid17.voice.AntiSpoofingAnalyzer\nimport com.iaandroid17.voice.PcmAudioCapture
+import com.iaandroid17.voice.AntiSpoofingAnalyzer
+import com.iaandroid17.voice.AntiSpoofingEngine
+import com.iaandroid17.voice.AntiSpoofModelInstaller
+import com.iaandroid17.voice.PcmAudioCapture
 import com.iaandroid17.voice.OwnerVoiceProfile
 import com.iaandroid17.voice.OwnerVoiceVerifier
 import com.iaandroid17.voice.VoiceSecurityAudit
@@ -119,6 +122,9 @@ fun SettingsScreen(vm: AppViewModel) {
     var embeddingBusy by remember { mutableStateOf(false) }
     var embeddingRevision by remember { mutableStateOf(0) }
     var embeddingNotice by remember { mutableStateOf("") }
+    var padReady by remember { mutableStateOf(AntiSpoofModelInstaller.isInstalled(context)) }
+    var padBusy by remember { mutableStateOf(false) }
+    var padNotice by remember { mutableStateOf("") }
     var verificationBusy by remember { mutableStateOf(false) }
     var verificationCapture by remember { mutableStateOf<PcmAudioCapture?>(null) }
     var verificationFile by remember { mutableStateOf<File?>(null) }
@@ -553,14 +559,28 @@ fun SettingsScreen(vm: AppViewModel) {
                                 check(file != null && file.exists()) { "Файл записи отсутствует" }
                                 val quality = withContext(Dispatchers.IO) { VoiceVerificationReadiness.inspectRecording(file) }
                                 check(quality.accepted) { quality.reason }
+                                check(padReady && AntiSpoofModelInstaller.isInstalled(context)) {
+                                    "Сначала установите обученную модель AASIST в настройках Voice ID."
+                                }
+                                val padResult = withContext(Dispatchers.IO) {
+                                    AntiSpoofingEngine(context).use { it.score(file.readBytes()) }
+                                }
+                                VoiceSecurityAudit.record(
+                                    context,
+                                    if (padResult.suspicious) "aasist_pad_suspicious" else "aasist_pad_not_flagged",
+                                    "bonaFide=${"%.3f".format(java.util.Locale.US, padResult.bonaFideScore)}; spoof=${"%.3f".format(java.util.Locale.US, padResult.spoofScore)}"
+                                )
+                                check(!padResult.suspicious) {
+                                    "AASIST обнаружил риск подделки (score=${"%.3f".format(java.util.Locale.US, padResult.bonaFideScore)}). Запишите новую фразу непосредственно в микрофон. Порог предварительный, возможны ложные отказы."
+                                }
                                 val antiSpoof = withContext(Dispatchers.IO) { AntiSpoofingAnalyzer.inspect(file.readBytes()) }
                                 VoiceSecurityAudit.record(
                                     context,
-                                    if (antiSpoof.suspicious) "anti_spoof_suspicious" else "anti_spoof_screen_pass",
+                                    if (antiSpoof.suspicious) "anti_spoof_heuristic_suspicious" else "anti_spoof_heuristic_pass",
                                     "risk=${"%.2f".format(java.util.Locale.US, antiSpoof.riskScore)}; ${antiSpoof.reasons.joinToString(",").take(80)}"
                                 )
                                 check(!antiSpoof.suspicious) {
-                                    "Anti-spoofing отклонил запись: ${antiSpoof.summary} Запишите новую фразу непосредственно в микрофон. Это эвристический фильтр, а не обученный детектор."
+                                    "Дополнительная эвристика отклонила запись: ${antiSpoof.summary} Повторите запись. Этот фильтр не является моделью PAD."
                                 }
                                 val slots = ownerProfile.sampleSlots
                                 check(slots.size == 3 && slots.all { ownerProfile.hasEmbedding(it) }) {
