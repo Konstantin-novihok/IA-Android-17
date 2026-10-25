@@ -73,10 +73,16 @@ private fun fmtBytes(b: Long): String =
 
 @Composable
 private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) {
+    var expanded by rememberSaveable(title) { mutableStateOf(true) }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            content()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                TextButton(onClick = { expanded = !expanded }) {
+                    Text(if (expanded) "Свернуть −" else "Развернуть +")
+                }
+            }
+            if (expanded) content()
         }
     }
 }
