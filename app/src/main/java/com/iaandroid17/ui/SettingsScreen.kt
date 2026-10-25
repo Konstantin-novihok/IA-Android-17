@@ -126,6 +126,7 @@ fun SettingsScreen(vm: AppViewModel) {
     var padReady by remember { mutableStateOf(AntiSpoofModelInstaller.isInstalled(context)) }
     var padBusy by remember { mutableStateOf(false) }
     var padNotice by remember { mutableStateOf("") }
+    var padThreshold by remember { mutableStateOf(context.getSharedPreferences("ia_voice_pad_settings", android.content.Context.MODE_PRIVATE).getFloat("threshold", AntiSpoofingEngine.DEFAULT_BONAFIDE_THRESHOLD)) }
     var pendingPadAttack by remember { mutableStateOf<Boolean?>(null) }
     var pendingPadAttackKind by remember { mutableStateOf("replay") }
     val padEvaluationStore = remember { VoicePadEvaluationStore(context) }
@@ -571,7 +572,7 @@ fun SettingsScreen(vm: AppViewModel) {
                                     "Сначала установите обученную модель AASIST в настройках Voice ID."
                                 }
                                 val padResult = withContext(Dispatchers.IO) {
-                                    AntiSpoofingEngine(context).use { it.score(file.readBytes()) }
+                                    AntiSpoofingEngine(context).use { it.score(file.readBytes(), padThreshold) }
                                 }
                                 VoiceSecurityAudit.record(
                                     context,
@@ -688,6 +689,12 @@ fun SettingsScreen(vm: AppViewModel) {
             if (padBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (padNotice.isNotBlank()) Text(padNotice, style = MaterialTheme.typography.bodySmall)
             Text(if (padReady) "Статус PAD: модель установлена и проверена." else "Статус PAD: модель не установлена; проверка голоса недоступна.", style = MaterialTheme.typography.labelSmall, color = if (padReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+            Text("Порог bona-fide: ${"%.2f".format(java.util.Locale.US, padThreshold)}", style = MaterialTheme.typography.bodyMedium)
+            Slider(value = padThreshold, onValueChange = { value ->
+                padThreshold = value
+                context.getSharedPreferences("ia_voice_pad_settings", android.content.Context.MODE_PRIVATE).edit().putFloat("threshold", value).apply()
+            }, valueRange = 0.05f..0.95f, steps = 17, enabled = padReady && !verificationBusy)
+            Text("Ниже порог — меньше отказов живой речи, но больше риск пропустить подделку; выше порог — обратный компромисс. Подбирайте только по тестовому набору, не включайте авторизацию по этому показателю.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             Text("Полевой тест обученного PAD", style = MaterialTheme.typography.titleSmall)
             Text("Проверяйте отдельно живую речь и воспроизведение через второй телефон/динамик. Для теста TTS, клонирования или voice conversion создайте/используйте аудио, на которое есть согласие. В тестовом режиме результат записывается даже если AASIST его отклоняет; аудио не сохраняется.", style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -699,7 +706,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 OutlinedButton(onClick = { pendingCalibrationSameSpeaker = null; pendingPadAttack = true; pendingPadAttackKind = "clone"; verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO) }, enabled = !verificationBusy && verificationCapture == null && padReady) { Text("Voice clone") }
                 OutlinedButton(onClick = { pendingCalibrationSameSpeaker = null; pendingPadAttack = true; pendingPadAttackKind = "conversion"; verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO) }, enabled = !verificationBusy && verificationCapture == null && padReady) { Text("Voice conversion") }
             }
-            val padReport = remember(padEvaluationRevision) { padEvaluationStore.report() }
+            val padReport = remember(padEvaluationRevision, padThreshold) { padEvaluationStore.report(padThreshold) }
             Text("Набор PAD: живая речь ${padReport.genuineCount}, атаки ${padReport.attackCount}; FRR ${padReport.falseRejectRate?.let { "%.1f".format(java.util.Locale.US, it * 100) + "%" } ?: "н/д"}; FAR ${padReport.falseAcceptRate?.let { "%.1f".format(java.util.Locale.US, it * 100) + "%" } ?: "н/д"}", style = MaterialTheme.typography.bodySmall)
             Text("По типам атак: " + listOf("replay", "tts", "clone", "conversion").joinToString { kind -> kind + "=" + padEvaluationStore.trials().count { it.attack && it.attackKind == kind } }, style = MaterialTheme.typography.labelSmall)
             Text(padReport.note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
