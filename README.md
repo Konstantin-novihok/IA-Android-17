@@ -14,8 +14,11 @@
 - Импорт модели или загрузка с проверкой SHA-256.
 - Работа с выбранными пользователем документами: извлечение доступного текста, анализ и поиск по фрагментам (RAG/BM25).
 - Анализ некоторых файлов и метаданных; точные поддерживаемые форматы и ограничения приведены в [INSTALL_RU.md](INSTALL_RU.md).
-- Голосовой ввод/озвучивание через системные Android-сервисы.
-- Агент для ограниченного набора действий с телефоном. Чувствительные действия требуют подтверждения; расширенное управление экраном зависит от Accessibility и должно включаться пользователем осознанно.
+- Фоновое голосовое ожидание запускается пользователем вручную и работает как foreground microphone service с постоянным уведомлением.
+- При первой настройке задаётся имя помощника; вызов строится как «имя, код один/два/три».
+- Встроенные тестовые сценарии: 1 — озвучить время, 2 — дату, 3 — произнести результат самопроверки. Количество коротких виброимпульсов соответствует номеру сценария; длительность регулируется в настройках.
+- Варианты оформления: системная динамическая тема, индиго, лесная и закатная палитры. Круглая иконка с монограммой IA.
+- Голосовой сервис зависит от установленного на Android движка распознавания. Предпочтение офлайн-режима передаётся движку, но офлайн-работа и непрерывное распознавание не гарантируются.
 - OCR доступен только в отдельной сборке с соответствующим модулем.
 
 ## Архитектура
@@ -58,4 +61,35 @@ CI выполняет сборку APK на GitHub Actions. Успешная к�
 
 1. Тестирование на реальном устройстве и профилирование производительности/нагрева.
 2. Полноценная проверка безопасности агентских сценариев и тесты.
-3. Отдельные модели для vision/ASR и расширение локальной памяти.
+3. Сценарный редактор и строго ограниченный планировщик действий.
+4. Проверка жизненного цикла microphone foreground service и работы при блокировке экрана на поддерживаемых устройствах.
+
+
+## Голосовой профиль владельца (предварительный модуль)
+
+- Можно записать три голосовых образца в настройках.
+- Файлы образцов шифруются AES-GCM ключом Android Keystore и сохраняются в no-backup каталоге приложения.
+- Доступно удаление профиля и ключа, после чего возможна новая регистрация.
+- **Voice ID/speaker verification не реализован.** Сбор и шифрование образцов не являются идентификацией владельца. Поэтому голосовые коды распознаются, но сценарии fail-closed блокируются с голосовым уведомлением до подключения и валидации модели проверки говорящего.
+- Распознавание фразы «имя помощника + код» само по себе не предотвращает воспроизведение или синтез голоса.
+
+
+## Voice ID security gate (current branch)
+
+**Security mode: chat only. Voice command execution is disabled**, both while unlocked and while locked, until a real owner speaker verifier is integrated, validated, and tested. The foreground service now fails closed before opening a recognition session.
+
+The owner setup screen can collect three enrollment recordings encrypted with AES-GCM using an Android Keystore key. These clips are enrollment material only; they are **not** speaker embeddings and do not establish identity.
+
+| # | Requirement | Current status |
+|---:|---|---|
+| 1 | Speaker embedding extraction | Not implemented |
+| 2 | Compare live voice to owner profile | Not implemented |
+| 3 | Calibrated accept/reject threshold | Not calibrated |
+| 4 | Recording-quality validation | Not implemented |
+| 5 | Replay/synthetic voice detection | Not implemented |
+| 6 | Owner-confirmed profile reset/re-enrollment | System biometric/device credential confirmation is present for reset |
+| 7 | Audit decisions/failures and resist repeated attempts | Bounded local audit log added; attempt rate-limiter not integrated |
+
+The log avoids saving audio and recognized phrases. A successful enrollment or name match must never be interpreted as successful identity verification.
+
+Before unlocking voice actions, integrate a dedicated on-device speaker-verification model and validate thresholds against false-accept/false-reject measurements, noisy and distant speech, playback attacks, synthetic speech, and real handset microphones. Keep consequential actions separately confirmed even after Voice ID passes.

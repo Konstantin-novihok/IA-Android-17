@@ -2,7 +2,7 @@ name: Android Debug APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, "feature/**" ]
   pull_request:
   workflow_dispatch:
 
@@ -33,6 +33,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+
+      - name: Run JVM unit tests
+        run: gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
 
       - name: Build debug APK
         run: gradle --no-daemon --console=plain --stacktrace :app:assembleDebug

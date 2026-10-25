@@ -3,14 +3,25 @@
 
     <!-- Интернет нужен только для загрузки модели; в приложении есть переключатель, который его блокирует. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="false"
         android:extractNativeLibs="true"
-        android:label="IA-Android-17"
+        android:label="IA"
+        android:icon="@drawable/ic_ia_launcher"
+        android:roundIcon="@drawable/ic_ia_launcher"
         android:largeHeap="true"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <service
+            android:name=".voice.VoiceScenarioService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

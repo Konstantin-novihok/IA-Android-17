@@ -1,6 +1,21 @@
 package com.iaandroid17.ui
 
 import android.content.Intent
+import android.hardware.biometrics.BiometricPrompt
+import android.hardware.biometrics.BiometricManager
+import android.os.CancellationSignal
+import com.iaandroid17.voice.PcmAudioCapture
+import com.iaandroid17.voice.OwnerVoiceProfile
+import com.iaandroid17.voice.VoiceSecurityAudit
+import com.iaandroid17.voice.VoiceVerificationReadiness
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.iaandroid17.voice.VoiceScenarioService
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -71,6 +86,47 @@ fun SettingsScreen(vm: AppViewModel) {
     val s = vm.settings
     var toDelete by remember { mutableStateOf<File?>(null) }
     var showAbout by remember { mutableStateOf(false) }
+    var listeningRequested by rememberSaveable { mutableStateOf(false) }
+    val ownerProfile = remember { OwnerVoiceProfile(context) }
+    var samples by remember { mutableStateOf(ownerProfile.sampleCount) }
+    var recordingSlot by remember { mutableStateOf<Int?>(null) }
+    var recorder by remember { mutableStateOf<PcmAudioCapture?>(null) }
+    var tempRecording by remember { mutableStateOf<File?>(null) }
+    var profileNotice by remember { mutableStateOf("") }
+    var askDeleteVoiceProfile by remember { mutableStateOf(false) }
+    val enrollmentMicPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            val slot = (samples + 1).coerceAtMost(3)
+            try {
+                val tmp = File(context.cacheDir, "owner-enroll-$slot.pcm")
+                val rec = PcmAudioCapture()
+                rec.setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+                rec.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+                rec.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+                rec.setAudioSamplingRate(16000)
+                rec.setAudioEncodingBitRate(64000)
+                rec.setOutputFile(tmp.absolutePath)
+                rec.prepare()
+                rec.start()
+                tempRecording = tmp
+                recorder = rec
+                recordingSlot = slot
+                profileNotice = "Записывается образец $slot. PCM16, моно, 16 кГц. Произнесите текст 2–12 секунд и сохраните."
+            } catch (e: Exception) {
+                recorder?.release()
+                recorder = null
+                recordingSlot = null
+                profileNotice = "Не удалось начать запись: ${e.message ?: "ошибка микрофона"}"
+            }
+        } else profileNotice = "Для записи нужен доступ к микрофону."
+    }
+    val voicePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        val mic = granted[Manifest.permission.RECORD_AUDIO] == true || context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        if (mic) {
+            context.startForegroundService(Intent(context, VoiceScenarioService::class.java).setAction(VoiceScenarioService.ACTION_START))
+            listeningRequested = true
+        }
+    }
 
     val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.importModel(uri)
@@ -196,6 +252,158 @@ fun SettingsScreen(vm: AppViewModel) {
             ) { v -> vm.update { it.copy(thinking = v) } }
         }
 
+        // ---------- Голосовой профиль владельца ----------
+        Section("Голосовой профиль владельца") {
+            Text("Записано образцов: $samples из 3. Записи хранятся только на устройстве в зашифрованном виде (AES-GCM, Android Keystore).", style = MaterialTheme.typography.bodySmall)
+            Text("РЕЖИМ: ТОЛЬКО ЧАТ. Голосовые команды закрыты до интеграции обученного speaker-verifier и anti-spoof. Embedding и сравнение отсутствуют; порог не откалиброван. Добавлена базовая проверка длительности/размера записи (это не оценка SNR). Перерегистрация защищена системной биометрией/учётными данными устройства. Добавлены ограничитель отказов и локальный аудит.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            Text(VoiceVerificationReadiness.status(context), style = MaterialTheme.typography.labelSmall)
+            Text("Аудит хранит события безопасности, не звук и не текст команд.", style = MaterialTheme.typography.labelSmall)
+            if (recordingSlot == null && samples < 3) {
+                Button(onClick = { enrollmentMicPermission.launch(Manifest.permission.RECORD_AUDIO) }) { Text("Записать образец ${samples + 1} из 3") }
+            }
+            if (recordingSlot != null) {
+                Text("Идёт запись образца $recordingSlot", style = MaterialTheme.typography.titleSmall)
+                Button(onClick = {
+                    try {
+                        recorder?.stop()
+                        recorder?.release()
+                        recorder = null
+                        val file = tempRecording
+                        val slot = recordingSlot
+                        if (file != null && slot != null && file.exists()) {
+                            val quality = VoiceVerificationReadiness.inspectRecording(file)
+                            if (quality.accepted) {
+                                ownerProfile.saveEnrollmentClip(slot, file.readBytes())
+                                samples = ownerProfile.sampleCount
+                                profileNotice = "Образец принят: ${quality.durationMs / 1000.0} сек., ${quality.bytes} байт. ${quality.reason}"
+                            } else profileNotice = quality.reason
+                            file.delete()
+                        } else profileNotice = "Запись отсутствует. Повторите."
+                    } catch (_: Exception) {
+                        profileNotice = "Не удалось сохранить. Повторите запись."
+                        tempRecording?.delete()
+                    } finally {
+                        recordingSlot = null
+                        tempRecording = null
+                    }
+                }) { Text("Сохранить образец") }
+                OutlinedButton(onClick = {
+                    runCatching { recorder?.stop() }
+                    recorder?.release()
+                    recorder = null
+                    recordingSlot = null
+                    tempRecording?.delete()
+                    tempRecording = null
+                    profileNotice = "Запись отменена."
+                }) { Text("Отменить") }
+            }
+            if (samples == 3) Text("Три PCM-образца собраны и защищены шифрованием на устройстве. Из них пока не извлекается обученный speaker embedding; голосовая авторизация команд отключена.", style = MaterialTheme.typography.bodyMedium)
+            if (profileNotice.isNotBlank()) Text(profileNotice, style = MaterialTheme.typography.bodySmall)
+            Text("Последние события безопасности:", style = MaterialTheme.typography.titleSmall)
+            VoiceSecurityAudit.snapshot(context).takeLast(8).asReversed().forEach { Text(it, style = MaterialTheme.typography.labelSmall) }
+            if (samples > 0) OutlinedButton(onClick = { askDeleteVoiceProfile = true }) { Text("Удалить профиль и образцы") }
+            Text("Шифрование защищает сохранённые образцы, но не подтверждает личность. Проверка качества PCM не распознаёт владельца, не обнаруживает воспроизведение или синтез и не доказывает живой голос. Пока не подключена обученная модель speaker verification с проверенной калибровкой и anti-spoof; запуск команд по голосу заблокирован.", style = MaterialTheme.typography.labelSmall)
+        }
+        if (askDeleteVoiceProfile) {
+            AlertDialog(
+                onDismissRequest = { askDeleteVoiceProfile = false },
+                title = { Text("Удалить голосовой профиль?") },
+                text = { Text("Будут удалены образцы и ключ шифрования. Это необратимо.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val activity = context as? android.app.Activity
+                        if (Build.VERSION.SDK_INT >= 30 && activity != null) {
+                            val callback = object : BiometricPrompt.AuthenticationCallback() {
+                                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                                    ownerProfile.deleteProfile()
+                                    samples = 0
+                                    profileNotice = "Профиль удалён после подтверждения владельца."
+                                }
+                                override fun onAuthenticationFailed() {
+                                    profileNotice = "Проверка владельца не пройдена. Профиль сохранён."
+                                }
+                                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                                    profileNotice = "Подтверждение отменено. Профиль сохранён."
+                                }
+                            }
+                            val prompt = BiometricPrompt.Builder(context)
+                                .setTitle("Подтвердите владельца")
+                                .setSubtitle("Повторная регистрация голосового профиля")
+                                .setDescription("Подтвердите удаление старых образцов системной биометрией или PIN-кодом.")
+                                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                                .build()
+                            prompt.authenticate(CancellationSignal(), context.mainExecutor, callback)
+                        } else {
+                            profileNotice = "Не удалось запросить проверку владельца. Профиль сохранён."
+                        }
+                        askDeleteVoiceProfile = false
+                    }) {
+                        Text("Подтвердить и удалить")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { askDeleteVoiceProfile = false }) { Text("Отмена") }
+                }
+            )
+        }
+
+        // ---------- Оформление ----------
+        Section("Тема и цветовая гамма") {
+            listOf("system" to "Системная / динамическая", "indigo" to "Индиго", "forest" to "Лесная", "sunset" to "Закат").forEach { (id, label) ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = s.themeStyle == id, onClick = { vm.update { it.copy(themeStyle = id) } })
+                    Text(label, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            Text("Цвета применяются сразу. Встроенные палитры адаптируются к светлому или тёмному режиму Android.", style = MaterialTheme.typography.labelSmall)
+        }
+
+        // ---------- Идентификация и голосовой запуск ----------
+        Section("Имя помощника и голосовой запуск") {
+            OutlinedTextField(
+                value = s.assistantName,
+                onValueChange = { v -> vm.update { it.copy(assistantName = v.take(40)) } },
+                label = { Text("Имя помощника") },
+                supportingText = { Text("Скажите это имя перед кодом: «${s.assistantName.ifBlank { "помощник" }}, код один».") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Text("Для теста доступны три безопасных сценария: 1 — произнести время; 2 — произнести дату; 3 — голосовая самопроверка. Произвольные команды и управление телефоном пока не выполняются.", style = MaterialTheme.typography.bodySmall)
+            Button(onClick = { profileNotice = "Speaker-verifier не интегрирован. Команды не активированы." }, enabled = false) {
+                Text("Голосовые команды заблокированы до Voice ID")
+            }
+            Text("Фоновая служба не открывает микрофон для команд. Доступен текстовый чат. Распознавание речи не доказывает личность.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            OutlinedButton(
+                onClick = {
+                    context.startService(Intent(context, VoiceScenarioService::class.java).setAction(VoiceScenarioService.ACTION_STOP))
+                    listeningRequested = false
+                },
+                enabled = listeningRequested
+            ) { Text("Остановить голосовое ожидание") }
+            Text("Работает как foreground-сервис с постоянным уведомлением. Разрешите микрофон. Распознавание зависит от движка речи на телефоне; автономная работа не гарантируется. После перезапуска телефона включите ожидание вручную.", style = MaterialTheme.typography.labelSmall)
+        }
+
+        // ---------- Голосовые сценарии ----------
+        Section("Голосовые сценарии") {
+            Text("Длительность короткого вибросигнала: ${s.scenarioPulseMs} мс", style = MaterialTheme.typography.bodyMedium)
+            Slider(
+                value = s.scenarioPulseMs.toFloat(),
+                onValueChange = { v -> vm.update { it.copy(scenarioPulseMs = v.roundToInt().coerceIn(40, 400)) } },
+                valueRange = 40f..400f,
+                steps = 17
+            )
+            Text("Ползунок задаёт длительность одного импульса (40–400 мс). Количество импульсов сможет обозначать номер сценария. Сценарии и фоновое распознавание пока не подключены.", style = MaterialTheme.typography.labelSmall)
+            OutlinedButton(onClick = {
+                val vib = if (android.os.Build.VERSION.SDK_INT >= 31) {
+                    (context.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as Vibrator
+                }
+                if (vib.hasVibrator()) vib.vibrate(VibrationEffect.createOneShot(s.scenarioPulseMs.toLong(), VibrationEffect.DEFAULT_AMPLITUDE))
+            }) { Text("Проверить вибрацию") }
+        }
+
         // ---------- Безопасность ----------
         Section("Права доступа и безопасность") {
             Text(
@@ -234,7 +442,7 @@ fun SettingsScreen(vm: AppViewModel) {
 
         // ---------- О приложении ----------
         Section("О приложении") {
-            Text("IA-Android-17 · версия 0.2.0 · движок llama.cpp (b11836)", style = MaterialTheme.typography.bodySmall)
+            Text("IA-Android-17 · версия 0.3.0 · движок llama.cpp (b11836)", style = MaterialTheme.typography.bodySmall)
             if (vm.systemInfo.isNotBlank()) Text(vm.systemInfo, style = MaterialTheme.typography.labelSmall)
             OutlinedButton(onClick = { showAbout = true }) { Text("О локальной обработке") }
         }

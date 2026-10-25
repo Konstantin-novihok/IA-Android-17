@@ -13,8 +13,8 @@ android {
         applicationId = "com.iaandroid17"
         minSdk = 33
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
 
         ndk { abiFilters += listOf("arm64-v8a") }
         externalNativeBuild {
@@ -61,5 +61,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

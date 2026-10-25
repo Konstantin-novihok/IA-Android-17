@@ -21,7 +21,10 @@ data class AppSettings(
     val allowNetwork: Boolean = false,
     val modelUrl: String = DEFAULT_MODEL_URL,
     val activeModel: String = "",
-    val systemPrompt: String = DEFAULT_SYSTEM_PROMPT
+    val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
+    val scenarioPulseMs: Int = 120,
+    val assistantName: String = "",
+    val themeStyle: String = "system"
 )
 
 class SettingsStore(context: Context) {
@@ -41,7 +44,10 @@ class SettingsStore(context: Context) {
             allowNetwork = prefs.getBoolean("allowNetwork", d.allowNetwork),
             modelUrl = prefs.getString("modelUrl", d.modelUrl) ?: d.modelUrl,
             activeModel = prefs.getString("activeModel", d.activeModel) ?: d.activeModel,
-            systemPrompt = prefs.getString("systemPrompt", d.systemPrompt) ?: d.systemPrompt
+            systemPrompt = prefs.getString("systemPrompt", d.systemPrompt) ?: d.systemPrompt,
+            scenarioPulseMs = prefs.getInt("scenarioPulseMs", d.scenarioPulseMs).coerceIn(40, 400),
+            assistantName = prefs.getString("assistantName", d.assistantName) ?: d.assistantName,
+            themeStyle = prefs.getString("themeStyle", d.themeStyle) ?: d.themeStyle
         )
     }
 
@@ -59,6 +65,9 @@ class SettingsStore(context: Context) {
             .putString("modelUrl", s.modelUrl)
             .putString("activeModel", s.activeModel)
             .putString("systemPrompt", s.systemPrompt)
+            .putInt("scenarioPulseMs", s.scenarioPulseMs.coerceIn(40, 400))
+            .putString("assistantName", s.assistantName.take(40))
+            .putString("themeStyle", s.themeStyle)
             .apply()
     }
 }
