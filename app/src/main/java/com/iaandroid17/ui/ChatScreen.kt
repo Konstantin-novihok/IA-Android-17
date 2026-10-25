@@ -4,6 +4,7 @@ import android.content.Intent
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
 import java.util.Locale
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -51,8 +52,23 @@ fun ChatScreen(vm: AppViewModel, onOpenSettings: () -> Unit) {
     var input by rememberSaveable { mutableStateOf("") }
     val context = LocalContext.current
     var ttsReady by remember { mutableStateOf(false) }
+    var autoSpeak by rememberSaveable { mutableStateOf(false) }
+    var lastAutoSpokenId by rememberSaveable { mutableStateOf(-1L) }
     val tts = remember { TextToSpeech(context) { status -> ttsReady = status == TextToSpeech.SUCCESS } }
     DisposableEffect(tts) { onDispose { tts.stop(); tts.shutdown() } }
+    val latestMessage = vm.messages.lastOrNull()
+    LaunchedEffect(latestMessage?.id, latestMessage?.streaming, ttsReady, autoSpeak) {
+        val latest = latestMessage
+        if (autoSpeak && ttsReady && latest != null && latest.role == Role.ASSISTANT && !latest.streaming && !latest.error && latest.id != lastAutoSpokenId) {
+            val answer = ChatFormat.parse(latest.raw).answer
+            val locale = Locale.getDefault()
+            if (answer.isNotBlank() && tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE) {
+                tts.language = locale
+                tts.speak(answer.take(6000), TextToSpeech.QUEUE_FLUSH, null, "ia-auto-speak")
+            }
+            lastAutoSpokenId = latest.id
+        }
+    }
     val speechInput = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull().orEmpty()
@@ -66,6 +82,7 @@ fun ChatScreen(vm: AppViewModel, onOpenSettings: () -> Unit) {
 
     Column(Modifier.fillMaxSize().imePadding()) {
         EngineStatusCard(vm, onOpenSettings)
+        TextButton(onClick = { autoSpeak = !autoSpeak; if (!autoSpeak) lastAutoSpokenId = vm.messages.lastOrNull()?.id ?: -1L }) { Text(if (autoSpeak) "Автоозвучивание: включено" else "Автоозвучивание: выключено") }
 
         if (vm.banner.isNotBlank()) {
             Card(
