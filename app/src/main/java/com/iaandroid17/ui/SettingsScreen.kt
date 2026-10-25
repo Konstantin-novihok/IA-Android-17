@@ -7,6 +7,7 @@ import android.hardware.biometrics.BiometricManager
 import android.os.CancellationSignal
 import com.iaandroid17.voice.OwnerVoiceProfile
 import com.iaandroid17.voice.VoiceSecurityAudit
+import com.iaandroid17.voice.VoiceVerificationReadiness
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -254,7 +255,9 @@ fun SettingsScreen(vm: AppViewModel) {
         // ---------- Голосовой профиль владельца ----------
         Section("Голосовой профиль владельца") {
             Text("Записано образцов: $samples из 3. Записи хранятся только на устройстве в зашифрованном виде (AES-GCM, Android Keystore).", style = MaterialTheme.typography.bodySmall)
-            Text("РЕЖИМ: ТОЛЬКО ЧАТ. Голосовой запуск и команды отключены даже при разблокированном экране до интеграции и проверки верификатора владельца. Speaker embedding: нет. Сравнение: нет. Порог: не откалиброван. Проверка качества: нет. Anti-spoof: нет. Повторная регистрация с системным подтверждением владельца: есть. Локальный журнал: добавлен; ограничитель попыток ещё не интегрирован.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            Text("РЕЖИМ: ТОЛЬКО ЧАТ. Голосовые команды закрыты до интеграции обученного speaker-verifier и anti-spoof. Embedding и сравнение отсутствуют; порог не откалиброван. Добавлена базовая проверка длительности/размера записи (это не оценка SNR). Перерегистрация защищена системной биометрией/учётными данными устройства. Добавлены ограничитель отказов и локальный аудит.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            Text(VoiceVerificationReadiness.status(context), style = MaterialTheme.typography.labelSmall)
+            Text("Аудит хранит события безопасности, не звук и не текст команд.", style = MaterialTheme.typography.labelSmall)
             if (recordingSlot == null && samples < 3) {
                 Button(onClick = { enrollmentMicPermission.launch(Manifest.permission.RECORD_AUDIO) }) { Text("Записать образец ${samples + 1} из 3") }
             }
@@ -267,12 +270,15 @@ fun SettingsScreen(vm: AppViewModel) {
                         recorder = null
                         val file = tempRecording
                         val slot = recordingSlot
-                        if (file != null && slot != null && file.exists() && file.length() > 2048L) {
-                            ownerProfile.saveEnrollmentClip(slot, file.readBytes())
-                            samples = ownerProfile.sampleCount
-                            profileNotice = "Образец зашифрован и сохранён локально."
+                        if (file != null && slot != null && file.exists()) {
+                            val quality = VoiceVerificationReadiness.inspectRecording(file)
+                            if (quality.accepted) {
+                                ownerProfile.saveEnrollmentClip(slot, file.readBytes())
+                                samples = ownerProfile.sampleCount
+                                profileNotice = "Образец принят: ${quality.durationMs / 1000.0} сек., ${quality.bytes} байт. ${quality.reason}"
+                            } else profileNotice = quality.reason
                             file.delete()
-                        } else profileNotice = "Запись слишком короткая. Повторите."
+                        } else profileNotice = "Запись отсутствует. Повторите."
                     } catch (_: Exception) {
                         profileNotice = "Не удалось сохранить. Повторите запись."
                         tempRecording?.delete()
@@ -356,7 +362,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 singleLine = true
             )
             Text("Для теста доступны три безопасных сценария: 1 — произнести время; 2 — произнести дату; 3 — голосовая самопроверка. Произвольные команды и управление телефоном пока не выполняются.", style = MaterialTheme.typography.bodySmall)
-            Button(onClick = { profileNotice = "Voice ID verifier отсутствует. Команды не активированы." }, enabled = false) {
+            Button(onClick = { profileNotice = "Speaker-verifier не интегрирован. Команды не активированы." }, enabled = false) {
                 Text("Голосовые команды заблокированы до Voice ID")
             }
             Text("Фоновая служба не открывает микрофон для команд. Доступен текстовый чат. Распознавание речи не доказывает личность.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
