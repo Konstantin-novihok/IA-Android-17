@@ -46,10 +46,10 @@ class VoiceScenarioService : Service(), TextToSpeech.OnInitListener {
             return START_NOT_STICKY
         }
         // Fail closed: encrypted enrollment recordings are not speaker embeddings.
-        // No validated similarity threshold or anti-spoof verifier is shipped yet.
+        // The manual speaker-match check exists, but no validated threshold or anti-spoof verifier is available for command authorization.
         VoiceVerificationReadiness.recordDenial(this, "verifier missing; start refused")
         startForeground(NOTIFICATION_ID, buildNotification())
-        speak("Голосовые команды заблокированы. Верификатор голоса владельца ещё не реализован. Доступен только чат.")
+        speak("Голосовые команды заблокированы. Ручное сравнение голоса уже доступно в настройках, но калибровка и защита от записи не подтверждены. Доступен только чат.")
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         return START_NOT_STICKY
