@@ -47,7 +47,7 @@ class VoiceScenarioService : Service(), TextToSpeech.OnInitListener {
         }
         // Fail closed: encrypted enrollment recordings are not speaker embeddings.
         // No validated similarity threshold or anti-spoof verifier is shipped yet.
-        VoiceSecurityAudit.record(this, "voice_start_denied", "speaker verifier unavailable")
+        VoiceVerificationReadiness.recordDenial(this, "verifier missing; start refused")
         startForeground(NOTIFICATION_ID, buildNotification())
         speak("Голосовые команды заблокированы. Верификатор голоса владельца ещё не реализован. Доступен только чат.")
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -107,6 +107,10 @@ class VoiceScenarioService : Service(), TextToSpeech.OnInitListener {
     private fun handlePhrase(raw: String) {
         val now = System.currentTimeMillis()
         if (raw.isBlank() || now - lastHandledAt < 6500) return
+        if (!VoiceVerificationReadiness.allowAttempt(this)) {
+            VoiceSecurityAudit.record(this, "attempt_blocked", "rate limit")
+            return
+        }
         val s = SettingsStore(this).load()
         val normalized = raw.lowercase(Locale.ROOT).replace(Regex("[^\\p{L}\\p{N} ]"), " ").replace(Regex("\\s+"), " ").trim()
         val alias = s.assistantName.lowercase(Locale.ROOT).trim()
@@ -119,7 +123,8 @@ class VoiceScenarioService : Service(), TextToSpeech.OnInitListener {
             else -> return
         }
         lastHandledAt = now
-        // Fail closed until a validated speaker verifier is integrated.
+        // A real identity verdict is unavailable: fail closed and account for the denial.
+        VoiceVerificationReadiness.recordDenial(this, "owner voice not verified")
         speak("Сценарий отменён. Проверка голоса владельца пока не подключена.")
         return
     }
