@@ -56,7 +56,9 @@ class PcmAudioCapture {
                             // Hard stop at 12 s of PCM16 mono 16 kHz; prevents unbounded cache/RAM use.
                             if (written >= MAX_CAPTURE_BYTES) active.set(false)
                         } else if (n < 0) {
-                            failure = "AudioRecord read error: $n"
+                            // AudioRecord may report a negative read code after a normal stop().
+                            // Only surface it as a capture failure while capture was still active.
+                            if (active.get()) failure = "AudioRecord read error: $n"
                             active.set(false)
                         }
                     }
