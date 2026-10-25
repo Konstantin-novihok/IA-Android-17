@@ -368,7 +368,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         engine.cancel()
     }
 
-    fun send(text: String) {
+    fun send(text: String, onComplete: ((answer: String, failed: Boolean) -> Unit)? = null) {
         val question = text.trim()
         if (generating || question.isEmpty()) return
         banner = ""
@@ -459,6 +459,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 generating = false
                 setMessage(reply.id) { it.copy(streaming = false) }
                 persist()
+                if (onComplete != null) {
+                    val completed = messages.firstOrNull { it.id == reply.id }
+                    val failed = completed == null || completed.error
+                    val answer = completed?.let {
+                        if (it.error) it.raw else ChatFormat.parse(it.raw).answer
+                    }.orEmpty()
+                    runCatching { onComplete(answer, failed) }
+                }
             }
         }
     }
