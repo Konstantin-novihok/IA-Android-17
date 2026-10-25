@@ -39,10 +39,8 @@ object OwnerVoiceVerifier {
         val best = scores.maxOrNull() ?: error("Нет доступных голосовых образцов")
         val matched = scores.count { it >= threshold }
 
-        // Require both an average match and a majority of independent enrolled samples.
-        val majority = enrolled.size / 2 + 1
         return Result(
-            acceptedAsLikelyOwner = mean >= threshold && matched >= majority,
+            acceptedAsLikelyOwner = mean >= threshold,
             meanSimilarity = mean,
             bestSimilarity = best,
             matchedSamples = matched,
