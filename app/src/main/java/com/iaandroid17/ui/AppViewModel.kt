@@ -31,6 +31,7 @@ import com.iaandroid17.model.ModelManager
 import com.iaandroid17.settings.AppSettings
 import com.iaandroid17.settings.DEFAULT_MODEL_URL
 import com.iaandroid17.settings.SettingsStore
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
