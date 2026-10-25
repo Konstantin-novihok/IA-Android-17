@@ -360,7 +360,7 @@ fun SettingsScreen(vm: AppViewModel) {
                     }) { Text("Записать заново / отменить") }
                 }
             }
-            if (samples == 3) Text("Три PCM-образца собраны и защищены шифрованием на устройстве. Из них пока не извлекается обученный speaker embedding; голосовая авторизация команд отключена.", style = MaterialTheme.typography.bodyMedium)
+            if (samples == 3) Text("Три PCM-образца собраны. После установки модели можно извлечь реальные speaker embeddings; голосовая авторизация команд остаётся отключённой.", style = MaterialTheme.typography.bodyMedium)
             if (samples > 0) {
                 Text("Сохранённые образцы", style = MaterialTheme.typography.titleSmall)
                 ownerProfile.sampleSlots.forEach { slot ->
@@ -373,11 +373,61 @@ fun SettingsScreen(vm: AppViewModel) {
                     }
                 }
             }
+            Text("Реальное извлечение speaker embedding", style = MaterialTheme.typography.titleSmall)
+            Text("CAM++ (512 измерений), локальный ONNX Runtime. Модель скачивается отдельно (~30 МБ), проверяется по SHA-256 и после установки работает офлайн. Векторы хранятся зашифрованными ключом Android Keystore.", style = MaterialTheme.typography.bodySmall)
+            if (!embeddingModelReady) {
+                Button(onClick = {
+                    if (!s.allowNetwork) {
+                        embeddingNotice = "Разрешите интернет переключателем выше только для загрузки модели."
+                    } else {
+                        scope.launch {
+                            embeddingBusy = true
+                            embeddingNotice = "Загрузка модели CAM++ и проверка SHA-256…"
+                            try {
+                                withContext(Dispatchers.IO) { SpeakerEmbeddingModelInstaller.download(context) }
+                                embeddingModelReady = SpeakerEmbeddingModelInstaller.isInstalled(context)
+                                embeddingNotice = if (embeddingModelReady) "Модель установлена и SHA-256 подтверждён." else "Модель не прошла проверку."
+                            } catch (e: Exception) {
+                                embeddingNotice = "Не удалось установить модель: " + (e.message ?: e.javaClass.simpleName)
+                            } finally { embeddingBusy = false }
+                        }
+                    }
+                }, enabled = !embeddingBusy && s.allowNetwork) { Text(if (embeddingBusy) "Загрузка…" else "Скачать модель speaker embedding (~30 МБ)") }
+            } else {
+                Text("Модель установлена; SHA-256 проверяется перед каждым созданием движка.", style = MaterialTheme.typography.bodySmall)
+                Button(onClick = {
+                    scope.launch {
+                        embeddingBusy = true
+                        embeddingNotice = "Извлечение векторов из сохранённых голосовых образцов…"
+                        try {
+                            val slots = ownerProfile.sampleSlots
+                            check(slots.isNotEmpty()) { "Сначала запишите хотя бы один голосовой образец." }
+                            val result = withContext(Dispatchers.IO) {
+                                SpeakerEmbeddingEngine(context).use { engine ->
+                                    slots.map { slot ->
+                                        val vector = engine.embed(ownerProfile.readEnrollmentClip(slot))
+                                        ownerProfile.saveEmbedding(slot, vector)
+                                        slot to vector.size
+                                    }
+                                }
+                            }
+                            embeddingRevision++
+                            embeddingNotice = "Реальные embedding извлечены и зашифрованы: " + result.joinToString { "образец " + it.first + " — " + it.second + "D" } + ". Это ещё не разрешает голосовые команды."
+                        } catch (e: Exception) {
+                            embeddingNotice = "Извлечение не завершено: " + (e.message ?: e.javaClass.simpleName)
+                        } finally { embeddingBusy = false }
+                    }
+                }, enabled = !embeddingBusy && samples > 0) { Text(if (embeddingBusy) "Вычисление…" else "Извлечь embeddings из сохранённых образцов") }
+                val stored = ownerProfile.sampleSlots.count { ownerProfile.hasEmbedding(it) }
+                Text("Сохранено зашифрованных векторов: " + stored + " из " + ownerProfile.sampleCount, style = MaterialTheme.typography.bodySmall)
+            }
+            if (embeddingBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (embeddingNotice.isNotBlank()) Text(embeddingNotice, style = MaterialTheme.typography.bodySmall)
             Text("Этапы Voice ID", style = MaterialTheme.typography.titleSmall)
             listOf(
                 "1. Запись PCM и базовые проверки сигнала" to "Доступно: длительность, уровень, clipping.",
-                "2. Обученная модель speaker embedding" to "НЕ ГОТОВО: модель и извлечение признаков не интегрированы.",
-                "3. Шаблон профиля и сравнение голосов" to "НЕ ГОТОВО: сходство с текущим голосом не рассчитывается.",
+                "2. Обученная модель speaker embedding" to if (embeddingModelReady) "РЕАЛИЗОВАНО: CAM++ ONNX, 512-D, fbank + mean normalization, проверка SHA-256." else "ОЖИДАЕТ УСТАНОВКИ: модель ещё не загружена.",
+                "3. Шаблон профиля и сравнение голосов" to if (ownerProfile.sampleSlots.any { ownerProfile.hasEmbedding(it) }) "Частично: извлечённые векторы зашифрованы; сравнение и калибровка ещё не подключены." else "НЕ ГОТОВО: сначала извлеките embedding из образцов."
                 "4. Биометрическая калибровка FAR/FRR" to "НЕ ГОТОВО: нет размеченных измерений и подтверждённого порога.",
                 "5. Защита от записи/синтеза (anti-spoof)" to "НЕ ГОТОВО: детектор и проверка живости отсутствуют.",
                 "6. Допуск голосовых команд" to "ЗАКРЫТ: команды отклоняются до независимой проверки всех этапов."
@@ -391,7 +441,7 @@ fun SettingsScreen(vm: AppViewModel) {
             Text("Последние события безопасности:", style = MaterialTheme.typography.titleSmall)
             VoiceSecurityAudit.snapshot(context).takeLast(8).asReversed().forEach { Text(it, style = MaterialTheme.typography.labelSmall) }
             if (samples > 0) OutlinedButton(onClick = { askDeleteVoiceProfile = true }) { Text("Удалить профиль и образцы") }
-            Text("Шифрование защищает сохранённые образцы, но не подтверждает личность. Проверка качества PCM не распознаёт владельца, не обнаруживает воспроизведение или синтез и не доказывает живой голос. Пока не подключена обученная модель speaker verification с проверенной калибровкой и anti-spoof; запуск команд по голосу заблокирован.", style = MaterialTheme.typography.labelSmall)
+            Text("Embedding — биометрический признак, а не доказательство личности. Порог не калиброван, anti-spoofing отсутствует; голосовая авторизация команд остаётся заблокированной.", style = MaterialTheme.typography.labelSmall)
         }
         if (confirmDeleteSample && deleteSampleSlot != null) {
             AlertDialog(
