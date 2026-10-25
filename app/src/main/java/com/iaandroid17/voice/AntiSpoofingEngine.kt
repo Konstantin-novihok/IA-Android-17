@@ -38,15 +38,16 @@ class AntiSpoofingEngine(context: Context) : Closeable {
     }
 
     fun score(pcm16: ByteArray): Result {
-        require(pcm16.size >= WINDOW_SAMPLES * 2) { "AASIST needs at least 4.04 seconds of PCM16 mono 16 kHz audio." }
-        require(pcm16.size % 2 == 0) { "Invalid PCM16 byte count." }
+        require(pcm16.size >= 64_000 && pcm16.size % 2 == 0) { "AASIST needs at least 2 seconds of PCM16 mono 16 kHz audio." }
         val samplesTotal = pcm16.size / 2
-        val startSample = maxOf(0, (samplesTotal - WINDOW_SAMPLES) / 2)
-        val values = FloatArray(WINDOW_SAMPLES)
-        for (i in values.indices) {
-            val offset = (startSample + i) * 2
+        val values = FloatArray(WINDOW_SAMPLES) // zero-pad short clips; center-crop long clips
+        val sourceStart = maxOf(0, (samplesTotal - WINDOW_SAMPLES) / 2)
+        val copied = minOf(samplesTotal, WINDOW_SAMPLES)
+        val targetStart = maxOf(0, (WINDOW_SAMPLES - samplesTotal) / 2)
+        for (i in 0 until copied) {
+            val offset = (sourceStart + i) * 2
             val sample = (pcm16[offset].toInt() and 0xff) or (pcm16[offset + 1].toInt() shl 8)
-            values[i] = sample.toShort().toInt() / 32768.0f
+            values[targetStart + i] = sample.toShort().toInt() / 32768.0f
         }
         val inputName = session.inputNames.first()
         OnnxTensor.createTensor(env, FloatBuffer.wrap(values), longArrayOf(1, WINDOW_SAMPLES.toLong())).use { tensor ->
