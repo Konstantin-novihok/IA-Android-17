@@ -309,34 +309,41 @@ fun SettingsScreen(vm: AppViewModel) {
                 onDismissRequest = { askDeleteVoiceProfile = false },
                 title = { Text("Удалить голосовой профиль?") },
                 text = { Text("Будут удалены образцы и ключ шифрования. Это необратимо.") },
-                confirmButton = { TextButton(onClick = {
-                    val activity = context as? android.app.Activity
-                    if (Build.VERSION.SDK_INT >= 30 && activity != null) {
-                        val prompt = BiometricPrompt.Builder(context)
-                            .setTitle("Подтвердите владельца")
-                            .setSubtitle("Повторная регистрация голосового профиля")
-                            .setDescription("Подтвердите удаление старых голосовых образцов системной биометрией или PIN-кодом.")
-                            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
-                            .build()
-                        prompt.authenticate(CancellationSignal(), context.mainExecutor, object : BiometricPrompt.AuthenticationCallback() {
-                            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                                ownerProfile.deleteProfile()
-                                samples = 0
-                                profileNotice = "Профиль удалён после подтверждения владельца. Для повторной регистрации запишите новые образцы."
+                confirmButton = {
+                    TextButton(onClick = {
+                        val activity = context as? android.app.Activity
+                        if (Build.VERSION.SDK_INT >= 30 && activity != null) {
+                            val callback = object : BiometricPrompt.AuthenticationCallback() {
+                                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                                    ownerProfile.deleteProfile()
+                                    samples = 0
+                                    profileNotice = "Профиль удалён после подтверждения владельца."
+                                }
+                                override fun onAuthenticationFailed() {
+                                    profileNotice = "Проверка владельца не пройдена. Профиль сохранён."
+                                }
+                                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                                    profileNotice = "Подтверждение отменено. Профиль сохранён."
+                                }
                             }
-                            override fun onAuthenticationFailed() {
-                                profileNotice = "Проверка владельца не пройдена. Профиль сохранён."
-                            }
-                            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                                profileNotice = "Подтверждение отменено. Профиль сохранён."
-                            }
-                        })
-                    } else {
-                        profileNotice = "Не удалось запросить проверку владельца. Профиль сохранён."
+                            val prompt = BiometricPrompt.Builder(context)
+                                .setTitle("Подтвердите владельца")
+                                .setSubtitle("Повторная регистрация голосового профиля")
+                                .setDescription("Подтвердите удаление старых образцов системной биометрией или PIN-кодом.")
+                                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                                .build()
+                            prompt.authenticate(CancellationSignal(), context.mainExecutor, callback)
+                        } else {
+                            profileNotice = "Не удалось запросить проверку владельца. Профиль сохранён."
+                        }
+                        askDeleteVoiceProfile = false
+                    }) {
+                        Text("Подтвердить и удалить")
                     }
-                    askDeleteVoiceProfile = false
-                }) { Text("Подтвердить и удалить") },
-                dismissButton = { TextButton(onClick = { askDeleteVoiceProfile = false }) { Text("Отмена") } }
+                },
+                dismissButton = {
+                    TextButton(onClick = { askDeleteVoiceProfile = false }) { Text("Отмена") }
+                }
             )
         }
 
