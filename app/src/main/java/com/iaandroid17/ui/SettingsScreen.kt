@@ -654,7 +654,7 @@ fun SettingsScreen(vm: AppViewModel) {
                         verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 },
-                enabled = !verificationBusy && samples == 3 && ownerProfile.sampleSlots.all { ownerProfile.hasEmbedding(it) } && embeddingModelReady && padReady
+                enabled = !verificationBusy && padReady && (pendingPadAttack != null || (samples == 3 && ownerProfile.sampleSlots.all { ownerProfile.hasEmbedding(it) } && embeddingModelReady))
             ) {
                 Text(when {
                     verificationBusy -> "Проверка…"
