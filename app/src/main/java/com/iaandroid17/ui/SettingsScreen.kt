@@ -538,7 +538,7 @@ fun SettingsScreen(vm: AppViewModel) {
             if (embeddingBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (embeddingNotice.isNotBlank()) Text(embeddingNotice, style = MaterialTheme.typography.bodySmall)
             Text("Проверка владельца по голосу", style = MaterialTheme.typography.titleSmall)
-            Text("Проверка использует новую живую запись с микрофона, CAM++ embedding и cosine similarity с сохранёнными векторами. Нужны 3 записанных образца и embeddings для всех трёх. Порог по умолчанию остаётся предварительным до калибровки.", style = MaterialTheme.typography.bodySmall)
+            Text("Проверка использует новую живую запись с микрофона, CAM++ embedding и среднюю cosine similarity с тремя образцами. После минимум 10 реальных записей владельца и 10 записей других людей применяется исследовательский порог EER; до этого действует предварительный порог 0,55. Это не включает голосовую авторизацию.", style = MaterialTheme.typography.bodySmall)
             Button(
                 onClick = {
                     if (verificationCapture != null) {
@@ -557,12 +557,14 @@ fun SettingsScreen(vm: AppViewModel) {
                                 check(slots.size == 3 && slots.all { ownerProfile.hasEmbedding(it) }) {
                                     "Нужны три образца владельца с рассчитанными embeddings"
                                 }
+                                val calibrationBeforeCheck = calibrationStore.report()
+                                val calibratedThreshold = if (calibrationBeforeCheck.genuineCount >= 10 && calibrationBeforeCheck.impostorCount >= 10) calibrationBeforeCheck.threshold else null
                                 val computed = withContext(Dispatchers.IO) {
                                     SpeakerEmbeddingEngine(context).use { engine ->
                                         val candidate = engine.embed(file.readBytes())
                                         val enrolled = slots.map { ownerProfile.readEmbedding(it) }
                                         val scores = enrolled.map { SpeakerEmbeddingMath.cosine(candidate, it) }
-                                        Triple(OwnerVoiceVerifier.compare(candidate, enrolled), scores.average().toFloat(), candidate.size)
+                                        Triple(OwnerVoiceVerifier.compare(candidate, enrolled, calibratedThreshold ?: OwnerVoiceVerifier.PROVISIONAL_THRESHOLD), scores.average().toFloat(), candidate.size)
                                     }
                                 }
                                 val calibrationLabel = pendingCalibrationSameSpeaker
@@ -584,7 +586,7 @@ fun SettingsScreen(vm: AppViewModel) {
                                     }
                                     verificationNotice = (if (result.acceptedAsLikelyOwner) "ГОЛОС ПОХОЖ НА ПРОФИЛЬ" else "СОВПАДЕНИЕ НЕ ПОДТВЕРЖДЕНО") +
                                         ": средняя похожесть ${"%.3f".format(java.util.Locale.US, result.meanSimilarity)}, лучший образец ${"%.3f".format(java.util.Locale.US, result.bestSimilarity)}, совпало ${result.matchedSamples}/${result.totalSamples}. " +
-                                        "Это не авторизация."
+                                        (if (calibratedThreshold != null) " Использован порог калибровки." else " Использован предварительный порог.") + " Это не авторизация."
                                 }
                             } catch (e: Exception) {
                                 VoiceSecurityAudit.record(context, "voice_check_error", e.javaClass.simpleName)
