@@ -68,44 +68,83 @@ object DocumentExtractor {
     private fun archive(context: Context, name: String, input: InputStream): Extracted {
         val packed = readLimited(input, MAX_FILE_BYTES.toInt() + 1)
         if (packed.size > MAX_FILE_BYTES) throw IOException("Архив превышает лимит 60 МБ")
-        val members = SafeArchiveReader.readZip(packed)
+
+        // Budgets are shared by every nesting level. A nested archive is never
+        // extracted to disk, and hostile/malformed siblings do not block useful files.
+        val maxFiles = 300
+        val maxDepth = 2
+        val maxExpanded = 80L * 1024 * 1024
+        var visited = 0
+        var expanded = 0L
+        var skipped = 0
+        val candidates = ArrayList<Pair<String, ByteArray>>()
+
+        fun collect(bytes: ByteArray, prefix: String, depth: Int) {
+            if (depth > maxDepth) { skipped++; return }
+            val entries = try {
+                SafeArchiveReader.readZip(
+                    bytes,
+                    SafeArchiveReader.Limits(
+                        maxEntries = maxFiles,
+                        maxEntryBytes = 12 * 1024 * 1024,
+                        maxTotalBytes = maxExpanded,
+                        maxCompressionRatio = 200
+                    )
+                )
+            } catch (e: Exception) {
+                skipped++
+                return
+            }
+            for (entry in entries) {
+                visited++
+                if (visited > maxFiles) throw IOException("Архив содержит более $maxFiles элементов с учётом вложенности")
+                expanded += entry.bytes.size
+                if (expanded > maxExpanded) throw IOException("Общий распакованный объём архива превышает 80 МБ")
+                val fullPath = if (prefix.isEmpty()) entry.path else "$prefix!/${entry.path}"
+                val ext = entry.path.substringAfterLast('/', "").substringAfterLast('.', "").lowercase()
+                if (ext == "zip") {
+                    if (depth >= maxDepth) { skipped++; continue }
+                    collect(entry.bytes, fullPath, depth + 1)
+                } else if (ext in textExt || ext in setOf("pdf", "docx", "pptx", "xlsx", "odt", "ods", "odp")) {
+                    candidates.add(fullPath to entry.bytes)
+                } else {
+                    skipped++
+                }
+            }
+        }
+        collect(packed, "", 0)
+
         val combined = StringBuilder()
         var indexed = 0
-        var skipped = 0
-        for (entry in members) {
-            val memberName = entry.path.substringAfterLast('/')
+        for ((path, bytes) in candidates) {
+            val memberName = path.substringAfterLast('/').substringAfterLast("!/")
             val ext = memberName.substringAfterLast('.', "").lowercase()
             try {
                 val extracted = when {
                     ext in textExt -> {
-                        var body = decode(entry.bytes)
+                        var body = decode(bytes)
                         if (ext == "html" || ext == "htm") body = stripTags(body)
                         finish(memberName, body, "")
                     }
-                    ext == "pdf" -> pdf(context, memberName, ByteArrayInputStream(entry.bytes))
-                    ext == "docx" -> zipText(memberName, ByteArrayInputStream(entry.bytes), "DOCX") { it == "word/document.xml" }
-                    ext == "pptx" -> zipText(memberName, ByteArrayInputStream(entry.bytes), "PPTX") { it.startsWith("ppt/slides/slide") && it.endsWith(".xml") }
-                    ext == "xlsx" -> zipText(memberName, ByteArrayInputStream(entry.bytes), "XLSX") { it == "xl/sharedStrings.xml" }
+                    ext == "pdf" -> pdf(context, memberName, ByteArrayInputStream(bytes))
+                    ext == "docx" -> zipText(memberName, ByteArrayInputStream(bytes), "DOCX") { it == "word/document.xml" }
+                    ext == "pptx" -> zipText(memberName, ByteArrayInputStream(bytes), "PPTX") { it.startsWith("ppt/slides/slide") && it.endsWith(".xml") }
+                    ext == "xlsx" -> zipText(memberName, ByteArrayInputStream(bytes), "XLSX (только текстовые ячейки)") { it == "xl/sharedStrings.xml" }
                     ext == "odt" || ext == "ods" || ext == "odp" ->
-                        zipText(memberName, ByteArrayInputStream(entry.bytes), ext.uppercase()) { it == "content.xml" }
+                        zipText(memberName, ByteArrayInputStream(bytes), ext.uppercase()) { it == "content.xml" }
                     else -> null
                 }
-                if (extracted == null) {
-                    skipped++
-                    continue
-                }
+                if (extracted == null) { skipped++; continue }
                 if (combined.isNotEmpty()) combined.append("\n\n")
-                combined.append("[Архив: ").append(entry.path).append("]\n")
-                    .append(extracted.text)
+                combined.append("[Архив: ").append(path).append("]\n").append(extracted.text)
                 indexed++
                 if (combined.length >= MAX_TEXT_CHARS) break
             } catch (_: Exception) {
-                // A malformed member must not prevent useful sibling files from importing.
                 skipped++
             }
         }
         if (indexed == 0) throw IOException("В архиве не найдено читаемых документов поддерживаемых типов")
-        val note = "ZIP: обработано файлов $indexed, пропущено $skipped. Вложенные архивы не раскрываются."
+        val note = "ZIP: обработано документов $indexed, пропущено элементов $skipped; вложенные ZIP: до $maxDepth уровней."
         return finish(name, combined.toString(), note)
     }
 
