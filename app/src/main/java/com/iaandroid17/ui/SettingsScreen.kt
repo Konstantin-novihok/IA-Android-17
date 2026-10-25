@@ -354,15 +354,10 @@ fun SettingsScreen(vm: AppViewModel) {
                 singleLine = true
             )
             Text("Для теста доступны три безопасных сценария: 1 — произнести время; 2 — произнести дату; 3 — голосовая самопроверка. Произвольные команды и управление телефоном пока не выполняются.", style = MaterialTheme.typography.bodySmall)
-            Button(
-                onClick = {
-                    if (s.assistantName.trim().length < 2) return@Button
-                    val perms = mutableListOf(Manifest.permission.RECORD_AUDIO)
-                    if (Build.VERSION.SDK_INT >= 33) perms.add(Manifest.permission.POST_NOTIFICATIONS)
-                    voicePermissionLauncher.launch(perms.toTypedArray())
-                },
-                enabled = s.assistantName.trim().length >= 2 && !listeningRequested
-            ) { Text("Включить голосовое ожидание") }
+            Button(onClick = { profileNotice = "Voice ID verifier отсутствует. Команды не активированы." }, enabled = false) {
+                Text("Голосовые команды заблокированы до Voice ID")
+            }
+            Text("Фоновая служба не открывает микрофон для команд. Доступен текстовый чат. Распознавание речи не доказывает личность.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             OutlinedButton(
                 onClick = {
                     context.startService(Intent(context, VoiceScenarioService::class.java).setAction(VoiceScenarioService.ACTION_STOP))
