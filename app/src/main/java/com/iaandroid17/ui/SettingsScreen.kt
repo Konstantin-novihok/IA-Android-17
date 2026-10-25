@@ -107,6 +107,10 @@ fun SettingsScreen(vm: AppViewModel) {
     var embeddingBusy by remember { mutableStateOf(false) }
     var embeddingRevision by remember { mutableStateOf(0) }
     var embeddingNotice by remember { mutableStateOf("") }
+    var verificationBusy by remember { mutableStateOf(false) }
+    var verificationCapture by remember { mutableStateOf<PcmAudioCapture?>(null) }
+    var verificationFile by remember { mutableStateOf<File?>(null) }
+    var verificationNotice by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val enrollmentMicPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) {
@@ -141,6 +145,33 @@ fun SettingsScreen(vm: AppViewModel) {
         if (mic) {
             context.startForegroundService(Intent(context, VoiceScenarioService::class.java).setAction(VoiceScenarioService.ACTION_START))
             listeningRequested = true
+        }
+    }
+
+    val verificationMicPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) {
+            verificationNotice = "Проверка отменена: нет доступа к микрофону."
+        } else {
+            try {
+                val tmp = File(context.cacheDir, "owner-verify-${System.currentTimeMillis()}.pcm")
+                val rec = PcmAudioCapture()
+                rec.setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+                rec.setOutputFormat(android.media.MediaRecorder.OutputFormat.DEFAULT)
+                rec.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.DEFAULT)
+                rec.setAudioSamplingRate(16000)
+                rec.setOutputFile(tmp.absolutePath)
+                rec.prepare()
+                rec.start()
+                verificationFile = tmp
+                verificationCapture = rec
+                verificationNotice = "Запись для проверки владельца идёт. Произнесите обычную фразу 2–12 секунд, затем нажмите «Сравнить голос»."
+            } catch (e: Exception) {
+                runCatching { verificationCapture?.release() }
+                verificationCapture = null
+                verificationFile?.delete()
+                verificationFile = null
+                verificationNotice = "Не удалось начать запись: ${e.message ?: e.javaClass.simpleName}"
+            }
         }
     }
 
@@ -289,7 +320,7 @@ fun SettingsScreen(vm: AppViewModel) {
         // ---------- Голосовой профиль владельца ----------
         Section("Голосовой профиль владельца") {
             Text("Записано образцов: $samples из 3. Записи хранятся только на устройстве в зашифрованном виде (AES-GCM, Android Keystore).", style = MaterialTheme.typography.bodySmall)
-            Text("РЕЖИМ: ТОЛЬКО ЧАТ. Голосовые команды закрыты до интеграции обученного speaker-verifier и anti-spoof. Embedding и сравнение отсутствуют; порог не откалиброван. Добавлена базовая проверка длительности/размера записи (это не оценка SNR). Перерегистрация защищена системной биометрией/учётными данными устройства. Добавлены ограничитель отказов и локальный аудит.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            Text("РЕЖИМ: ТОЛЬКО ЧАТ. Реальное сравнение CAM++ embeddings подключено для ручной проверки владельца. Порог предварительный и не откалиброван; anti-spoof отсутствует, поэтому голосовые команды и опасные действия остаются закрыты. Перерегистрация защищена системной биометрией/учётными данными устройства; ведутся ограничитель отказов и локальный аудит.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             Text(VoiceVerificationReadiness.status(context), style = MaterialTheme.typography.labelSmall)
             Text("Аудит хранит события безопасности, не звук и не текст команд.", style = MaterialTheme.typography.labelSmall)
             if (recordingSlot == null && samples < 3) {
@@ -360,7 +391,7 @@ fun SettingsScreen(vm: AppViewModel) {
                     }) { Text("Записать заново / отменить") }
                 }
             }
-            if (samples == 3) Text("Три PCM-образца собраны. После установки модели можно извлечь реальные speaker embeddings; голосовая авторизация команд остаётся отключённой.", style = MaterialTheme.typography.bodyMedium)
+            if (samples == 3) Text("Три PCM-образца собраны. После извлечения embeddings можно выполнить ручную проверку сходства голоса; голосовая авторизация команд остаётся отключённой.", style = MaterialTheme.typography.bodyMedium)
             if (samples > 0) {
                 Text("Сохранённые образцы", style = MaterialTheme.typography.titleSmall)
                 ownerProfile.sampleSlots.forEach { slot ->
@@ -423,11 +454,73 @@ fun SettingsScreen(vm: AppViewModel) {
             }
             if (embeddingBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (embeddingNotice.isNotBlank()) Text(embeddingNotice, style = MaterialTheme.typography.bodySmall)
+            Text("Проверка владельца по голосу", style = MaterialTheme.typography.titleSmall)
+            Text("Проверка использует новую живую запись с микрофона, CAM++ embedding и cosine similarity с сохранёнными векторами. Нужны 3 записанных образца и embeddings для всех трёх. Порог 0,55 — предварительный, не откалиброван; результат не открывает доступ к командам.", style = MaterialTheme.typography.bodySmall)
+            Button(
+                onClick = {
+                    if (verificationCapture != null) {
+                        scope.launch {
+                            verificationBusy = true
+                            try {
+                                val rec = verificationCapture
+                                rec?.stop()
+                                rec?.release()
+                                verificationCapture = null
+                                val file = verificationFile
+                                check(file != null && file.exists()) { "Файл записи отсутствует" }
+                                val quality = withContext(Dispatchers.IO) { VoiceVerificationReadiness.inspectRecording(file) }
+                                check(quality.accepted) { quality.reason }
+                                val slots = ownerProfile.sampleSlots
+                                check(slots.size == 3 && slots.all { ownerProfile.hasEmbedding(it) }) {
+                                    "Нужны три образца владельца с рассчитанными embeddings"
+                                }
+                                val result = withContext(Dispatchers.IO) {
+                                    SpeakerEmbeddingEngine(context).use { engine ->
+                                        val candidate = engine.embed(file.readBytes())
+                                        val enrolled = slots.map { ownerProfile.readEmbedding(it) }
+                                        OwnerVoiceVerifier.compare(candidate, enrolled)
+                                    }
+                                }
+                                VoiceSecurityAudit.record(
+                                    context,
+                                    if (result.acceptedAsLikelyOwner) "voice_match_candidate" else "voice_match_rejected",
+                                    "mean=${"%.3f".format(java.util.Locale.US, result.meanSimilarity)}; best=${"%.3f".format(java.util.Locale.US, result.bestSimilarity)}; matched=${result.matchedSamples}/${result.totalSamples}; provisional"
+                                )
+                                if (!result.acceptedAsLikelyOwner) {
+                                    VoiceVerificationReadiness.recordDenial(context, "voice similarity below provisional threshold")
+                                }
+                                verificationNotice = (if (result.acceptedAsLikelyOwner) "ГОЛОС ПОХОЖ НА ПРОФИЛЬ" else "СОВПАДЕНИЕ НЕ ПОДТВЕРЖДЕНО") +
+                                    ": средняя похожесть ${"%.3f".format(java.util.Locale.US, result.meanSimilarity)}, лучший образец ${"%.3f".format(java.util.Locale.US, result.bestSimilarity)}, совпало ${result.matchedSamples}/${result.totalSamples}. " +
+                                    "Порог ${result.threshold} предварительный. Это не авторизация."
+                            } catch (e: Exception) {
+                                VoiceSecurityAudit.record(context, "voice_check_error", e.javaClass.simpleName)
+                                verificationNotice = "Проверка не выполнена: ${e.message ?: e.javaClass.simpleName}"
+                            } finally {
+                                verificationFile?.delete()
+                                verificationFile = null
+                                verificationCapture = null
+                                verificationBusy = false
+                            }
+                        }
+                    } else {
+                        verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                enabled = !verificationBusy && samples == 3 && ownerProfile.sampleSlots.all { ownerProfile.hasEmbedding(it) } && embeddingModelReady
+            ) {
+                Text(when {
+                    verificationBusy -> "Проверка…"
+                    verificationCapture != null -> "Сравнить голос"
+                    else -> "Записать и проверить владельца"
+                })
+            }
+            if (verificationNotice.isNotBlank()) Text(verificationNotice, style = MaterialTheme.typography.bodySmall, color = if (verificationNotice.startsWith("ГОЛОС ПОХОЖ")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+            if (verificationBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
             Text("Этапы Voice ID", style = MaterialTheme.typography.titleSmall)
             listOf(
                 "1. Запись PCM и базовые проверки сигнала" to "Доступно: длительность, уровень, clipping.",
                 "2. Обученная модель speaker embedding" to if (embeddingModelReady) "РЕАЛИЗОВАНО: CAM++ ONNX, 512-D, fbank + mean normalization, проверка SHA-256." else "ОЖИДАЕТ УСТАНОВКИ: модель ещё не загружена.",
-                "3. Шаблон профиля и сравнение голосов" to if (ownerProfile.sampleSlots.any { ownerProfile.hasEmbedding(it) }) "Частично: извлечённые векторы зашифрованы; сравнение и калибровка ещё не подключены." else "НЕ ГОТОВО: сначала извлеките embedding из образцов.",
+                "3. Шаблон профиля и сравнение голосов" to if (ownerProfile.sampleSlots.size == 3 && ownerProfile.sampleSlots.all { ownerProfile.hasEmbedding(it) }) "РЕАЛИЗОВАНО: сравнение живой записи с тремя CAM++ embeddings; предварительный порог 0,55, не авторизационный." else "НЕ ГОТОВО: нужны три сохранённых образца и embeddings.",
                 "4. Биометрическая калибровка FAR/FRR" to "НЕ ГОТОВО: нет размеченных измерений и подтверждённого порога.",
                 "5. Защита от записи/синтеза (anti-spoof)" to "НЕ ГОТОВО: детектор и проверка живости отсутствуют.",
                 "6. Допуск голосовых команд" to "ЗАКРЫТ: команды отклоняются до независимой проверки всех этапов."
