@@ -18,6 +18,10 @@
         android:largeHeap="true"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <service
+            android:name=".voice.VoiceScenarioService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
