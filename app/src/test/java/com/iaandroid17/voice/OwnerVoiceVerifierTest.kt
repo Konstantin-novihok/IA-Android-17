@@ -3,15 +3,21 @@ package com.iaandroid17.voice
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.sqrt
 
 class OwnerVoiceVerifierTest {
+    private fun vector(vararg values: Float): FloatArray =
+        FloatArray(SpeakerEmbeddingEngine.EMBEDDING_DIM).also { out ->
+            values.copyInto(out, endIndex = minOf(values.size, out.size))
+        }
+
     @Test
     fun matchingSpeakerVectorPassesProvisionalComparisonButNeverAuthorizes() {
-        val candidate = floatArrayOf(1f, 0f, 0f)
+        val candidate = vector(1f, 0f, 0f)
         val enrolled = listOf(
-            floatArrayOf(1f, 0f, 0f),
-            floatArrayOf(0.8f, 0.6f, 0f),
-            floatArrayOf(0.7f, 0.0f, kotlin.math.sqrt(0.51f))
+            vector(1f, 0f, 0f),
+            vector(0.8f, 0.6f, 0f),
+            vector(0.7f, 0f, sqrt(0.51f))
         )
 
         val result = OwnerVoiceVerifier.compare(candidate, enrolled)
@@ -24,11 +30,11 @@ class OwnerVoiceVerifierTest {
 
     @Test
     fun unrelatedVectorIsRejected() {
-        val candidate = floatArrayOf(0f, 1f, 0f)
+        val candidate = vector(0f, 1f, 0f)
         val enrolled = listOf(
-            floatArrayOf(1f, 0f, 0f),
-            floatArrayOf(0.99f, 0.1f, 0f),
-            floatArrayOf(0.98f, 0f, 0.2f)
+            vector(1f, 0f, 0f),
+            vector(0.99f, 0.1f, 0f),
+            vector(0.98f, 0f, 0.2f)
         )
 
         val result = OwnerVoiceVerifier.compare(candidate, enrolled)
