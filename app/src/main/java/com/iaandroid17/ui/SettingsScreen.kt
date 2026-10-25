@@ -103,7 +103,7 @@ fun SettingsScreen(vm: AppViewModel) {
     var askDeleteVoiceProfile by remember { mutableStateOf(false) }
     var deleteSampleSlot by remember { mutableStateOf<Int?>(null) }
     var confirmDeleteSample by remember { mutableStateOf(false) }
-    var embeddingModelReady by remember { mutableStateOf(SpeakerEmbeddingModelInstaller.isInstalled(context)) }
+    var embeddingModelReady by remember { mutableStateOf(SpeakerEmbeddingModelInstaller.hasModelFile(context)) }
     var embeddingBusy by remember { mutableStateOf(false) }
     var embeddingRevision by remember { mutableStateOf(0) }
     var embeddingNotice by remember { mutableStateOf("") }
