@@ -90,6 +90,7 @@ fun SettingsScreen(vm: AppViewModel) {
     val ownerProfile = remember { OwnerVoiceProfile(context) }
     var samples by remember { mutableStateOf(ownerProfile.sampleCount) }
     var recordingSlot by remember { mutableStateOf<Int?>(null) }
+    var captureStopped by remember { mutableStateOf(false) }
     var recorder by remember { mutableStateOf<PcmAudioCapture?>(null) }
     var tempRecording by remember { mutableStateOf<File?>(null) }
     var profileNotice by remember { mutableStateOf("") }
@@ -111,7 +112,8 @@ fun SettingsScreen(vm: AppViewModel) {
                 tempRecording = tmp
                 recorder = rec
                 recordingSlot = slot
-                profileNotice = "Записывается образец $slot. PCM16, моно, 16 кГц. Произнесите текст 2–12 секунд и сохраните."
+                captureStopped = false
+                profileNotice = "Идёт запись образца $slot. PCM16, моно, 16 кГц. Когда закончите говорить, нажмите «Остановить запись», затем «Сохранить образец». Длительность 2–12 секунд."
             } catch (e: Exception) {
                 recorder?.release()
                 recorder = null
@@ -262,40 +264,69 @@ fun SettingsScreen(vm: AppViewModel) {
                 Button(onClick = { enrollmentMicPermission.launch(Manifest.permission.RECORD_AUDIO) }) { Text("Записать образец ${samples + 1} из 3") }
             }
             if (recordingSlot != null) {
-                Text("Идёт запись образца $recordingSlot", style = MaterialTheme.typography.titleSmall)
-                Button(onClick = {
-                    try {
-                        recorder?.stop()
-                        recorder?.release()
+                Text(
+                    if (captureStopped) "Запись образца $recordingSlot остановлена. Проверьте качество, затем сохраните."
+                    else "Идёт запись образца $recordingSlot",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                if (!captureStopped) {
+                    Button(onClick = {
+                        try {
+                            recorder?.stop()
+                            recorder?.release()
+                            recorder = null
+                            captureStopped = true
+                            val file = tempRecording
+                            if (file == null || !file.exists()) {
+                                profileNotice = "Временная запись отсутствует. Отмените и повторите."
+                            } else {
+                                val quality = VoiceVerificationReadiness.inspectRecording(file)
+                                profileNotice = if (quality.accepted)
+                                    "Запись готова: ${quality.durationMs / 1000.0} сек. ${quality.reason}"
+                                else "Запись остановлена, но не прошла проверку: ${quality.reason} Можно отменить и записать заново."
+                            }
+                        } catch (e: Exception) {
+                            profileNotice = "Ошибка остановки записи: ${e.message ?: "неизвестная ошибка"}"
+                            runCatching { recorder?.release() }
+                            recorder = null
+                            captureStopped = true
+                        }
+                    }) { Text("Остановить запись") }
+                } else {
+                    Button(onClick = {
+                        try {
+                            val file = tempRecording
+                            val slot = recordingSlot
+                            if (file == null || slot == null || !file.exists()) {
+                                profileNotice = "Запись отсутствует. Повторите."
+                            } else {
+                                val quality = VoiceVerificationReadiness.inspectRecording(file)
+                                if (quality.accepted) {
+                                    ownerProfile.saveEnrollmentClip(slot, file.readBytes())
+                                    samples = ownerProfile.sampleCount
+                                    profileNotice = "Образец сохранён: ${quality.durationMs / 1000.0} сек., ${quality.bytes} байт. ${quality.reason}"
+                                    file.delete()
+                                    recordingSlot = null
+                                    tempRecording = null
+                                    captureStopped = false
+                                } else {
+                                    profileNotice = "Сохранение отклонено: ${quality.reason} Запишите образец заново."
+                                }
+                            }
+                        } catch (e: Exception) {
+                            profileNotice = "Не удалось сохранить образец: ${e.message ?: "ошибка"}"
+                        }
+                    }, enabled = captureStopped) { Text("Сохранить образец") }
+                    OutlinedButton(onClick = {
+                        runCatching { recorder?.release() }
                         recorder = null
-                        val file = tempRecording
-                        val slot = recordingSlot
-                        if (file != null && slot != null && file.exists()) {
-                            val quality = VoiceVerificationReadiness.inspectRecording(file)
-                            if (quality.accepted) {
-                                ownerProfile.saveEnrollmentClip(slot, file.readBytes())
-                                samples = ownerProfile.sampleCount
-                                profileNotice = "Образец принят: ${quality.durationMs / 1000.0} сек., ${quality.bytes} байт. ${quality.reason}"
-                            } else profileNotice = quality.reason
-                            file.delete()
-                        } else profileNotice = "Запись отсутствует. Повторите."
-                    } catch (_: Exception) {
-                        profileNotice = "Не удалось сохранить. Повторите запись."
                         tempRecording?.delete()
-                    } finally {
-                        recordingSlot = null
                         tempRecording = null
-                    }
-                }) { Text("Сохранить образец") }
-                OutlinedButton(onClick = {
-                    runCatching { recorder?.stop() }
-                    recorder?.release()
-                    recorder = null
-                    recordingSlot = null
-                    tempRecording?.delete()
-                    tempRecording = null
-                    profileNotice = "Запись отменена."
-                }) { Text("Отменить") }
+                        recordingSlot = null
+                        captureStopped = false
+                        profileNotice = "Образец отменён. Можно начать запись заново."
+                    }) { Text("Записать заново / отменить") }
+                }
             }
             if (samples == 3) Text("Три PCM-образца собраны и защищены шифрованием на устройстве. Из них пока не извлекается обученный speaker embedding; голосовая авторизация команд отключена.", style = MaterialTheme.typography.bodyMedium)
             if (profileNotice.isNotBlank()) Text(profileNotice, style = MaterialTheme.typography.bodySmall)

@@ -47,6 +47,7 @@ object DocumentExtractor {
 
         input.use { stream ->
             when (ext) {
+                "zip" -> archive(context, name, stream)
                 "pdf" -> pdf(context, name, stream)
                 "docx" -> zipText(name, stream, "docx") { it == "word/document.xml" }
                 "pptx" -> zipText(name, stream, "pptx") { it.startsWith("ppt/slides/slide") && it.endsWith(".xml") }
@@ -56,6 +57,55 @@ object DocumentExtractor {
                 else -> plain(name, stream, ext)
             }
         }
+    }
+
+    /**
+     * Imports supported documents inside ZIP into one searchable collection entry.
+     * Entries are read in memory under SafeArchiveReader budgets; archive paths are
+     * never written to disk. Nested archives and unsupported binary members are skipped.
+     */
+    private fun archive(context: Context, name: String, input: InputStream): Extracted {
+        val packed = readLimited(input, MAX_FILE_BYTES.toInt() + 1)
+        if (packed.size > MAX_FILE_BYTES) throw IOException("Архив превышает лимит 60 МБ")
+        val members = SafeArchiveReader.readZip(packed)
+        val combined = StringBuilder()
+        var indexed = 0
+        var skipped = 0
+        for (entry in members) {
+            val memberName = entry.path.substringAfterLast('/')
+            val ext = memberName.substringAfterLast('.', "").lowercase()
+            try {
+                val extracted = when {
+                    ext in textExt -> {
+                        var body = decode(entry.bytes)
+                        if (ext == "html" || ext == "htm") body = stripTags(body)
+                        finish(memberName, body, "")
+                    }
+                    ext == "pdf" -> pdf(context, memberName, ByteArrayInputStream(entry.bytes))
+                    ext == "docx" -> zipText(memberName, ByteArrayInputStream(entry.bytes), "DOCX") { it == "word/document.xml" }
+                    ext == "pptx" -> zipText(memberName, ByteArrayInputStream(entry.bytes), "PPTX") { it.startsWith("ppt/slides/slide") && it.endsWith(".xml") }
+                    ext == "xlsx" -> zipText(memberName, ByteArrayInputStream(entry.bytes), "XLSX") { it == "xl/sharedStrings.xml" }
+                    ext == "odt" || ext == "ods" || ext == "odp" ->
+                        zipText(memberName, ByteArrayInputStream(entry.bytes), ext.uppercase()) { it == "content.xml" }
+                    else -> null
+                }
+                if (extracted == null) {
+                    skipped++
+                    continue
+                }
+                if (combined.isNotEmpty()) combined.append("\n\n")
+                combined.append("[Архив: ").append(entry.path).append("]\n")
+                    .append(extracted.text)
+                indexed++
+                if (combined.length >= MAX_TEXT_CHARS) break
+            } catch (_: Exception) {
+                // A malformed member must not prevent useful sibling files from importing.
+                skipped++
+            }
+        }
+        if (indexed == 0) throw IOException("В архиве не найдено читаемых документов поддерживаемых типов")
+        val note = "ZIP: обработано файлов $indexed, пропущено $skipped. Вложенные архивы не раскрываются."
+        return finish(name, combined.toString(), note)
     }
 
     private fun plain(name: String, input: InputStream, ext: String): Extracted {
