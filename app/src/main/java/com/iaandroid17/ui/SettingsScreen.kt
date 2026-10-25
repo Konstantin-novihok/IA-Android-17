@@ -1,10 +1,10 @@
 package com.iaandroid17.ui
 
 import android.content.Intent
-import android.media.MediaRecorder
 import android.hardware.biometrics.BiometricPrompt
 import android.hardware.biometrics.BiometricManager
 import android.os.CancellationSignal
+import com.iaandroid17.voice.PcmAudioCapture
 import com.iaandroid17.voice.OwnerVoiceProfile
 import com.iaandroid17.voice.VoiceSecurityAudit
 import com.iaandroid17.voice.VoiceVerificationReadiness
@@ -90,7 +90,7 @@ fun SettingsScreen(vm: AppViewModel) {
     val ownerProfile = remember { OwnerVoiceProfile(context) }
     var samples by remember { mutableStateOf(ownerProfile.sampleCount) }
     var recordingSlot by remember { mutableStateOf<Int?>(null) }
-    var recorder by remember { mutableStateOf<MediaRecorder?>(null) }
+    var recorder by remember { mutableStateOf<PcmAudioCapture?>(null) }
     var tempRecording by remember { mutableStateOf<File?>(null) }
     var profileNotice by remember { mutableStateOf("") }
     var askDeleteVoiceProfile by remember { mutableStateOf(false) }
@@ -98,11 +98,11 @@ fun SettingsScreen(vm: AppViewModel) {
         if (granted) {
             val slot = (samples + 1).coerceAtMost(3)
             try {
-                val tmp = File(context.cacheDir, "owner-enroll-$slot.m4a")
-                val rec = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(context) else MediaRecorder()
-                rec.setAudioSource(MediaRecorder.AudioSource.MIC)
-                rec.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                rec.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                val tmp = File(context.cacheDir, "owner-enroll-$slot.pcm")
+                val rec = PcmAudioCapture()
+                rec.setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+                rec.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+                rec.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
                 rec.setAudioSamplingRate(16000)
                 rec.setAudioEncodingBitRate(64000)
                 rec.setOutputFile(tmp.absolutePath)
@@ -111,7 +111,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 tempRecording = tmp
                 recorder = rec
                 recordingSlot = slot
-                profileNotice = "Записывается образец $slot. Произнесите фразу и сохраните."
+                profileNotice = "Записывается образец $slot. PCM16, моно, 16 кГц. Произнесите текст 2–12 секунд и сохраните."
             } catch (e: Exception) {
                 recorder?.release()
                 recorder = null
@@ -297,12 +297,12 @@ fun SettingsScreen(vm: AppViewModel) {
                     profileNotice = "Запись отменена."
                 }) { Text("Отменить") }
             }
-            if (samples == 3) Text("Три образца собраны. Профиль ещё не допущен к авторизации команд.", style = MaterialTheme.typography.bodyMedium)
+            if (samples == 3) Text("Три PCM-образца собраны и защищены шифрованием на устройстве. Из них пока не извлекается обученный speaker embedding; голосовая авторизация команд отключена.", style = MaterialTheme.typography.bodyMedium)
             if (profileNotice.isNotBlank()) Text(profileNotice, style = MaterialTheme.typography.bodySmall)
             Text("Последние события безопасности:", style = MaterialTheme.typography.titleSmall)
             VoiceSecurityAudit.snapshot(context).takeLast(8).asReversed().forEach { Text(it, style = MaterialTheme.typography.labelSmall) }
             if (samples > 0) OutlinedButton(onClick = { askDeleteVoiceProfile = true }) { Text("Удалить профиль и образцы") }
-            Text("Перерегистрация требует системного подтверждения владельца. Шифрование образцов не подтверждает личность.", style = MaterialTheme.typography.labelSmall)
+            Text("Шифрование защищает сохранённые образцы, но не подтверждает личность. Проверка качества PCM не распознаёт владельца, не обнаруживает воспроизведение или синтез и не доказывает живой голос. Пока не подключена обученная модель speaker verification с проверенной калибровкой и anti-spoof; запуск команд по голосу заблокирован.", style = MaterialTheme.typography.labelSmall)
         }
         if (askDeleteVoiceProfile) {
             AlertDialog(
