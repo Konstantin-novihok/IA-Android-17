@@ -1,6 +1,9 @@
 package com.iaandroid17.ui
 
 import android.content.Intent
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -206,6 +209,15 @@ fun SettingsScreen(vm: AppViewModel) {
                 steps = 17
             )
             Text("Ползунок задаёт длительность одного импульса (40–400 мс). Количество импульсов сможет обозначать номер сценария. Сценарии и фоновое распознавание пока не подключены.", style = MaterialTheme.typography.labelSmall)
+            OutlinedButton(onClick = {
+                val vib = if (android.os.Build.VERSION.SDK_INT >= 31) {
+                    (context.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as Vibrator
+                }
+                if (vib.hasVibrator()) vib.vibrate(VibrationEffect.createOneShot(s.scenarioPulseMs.toLong(), VibrationEffect.DEFAULT_AMPLITUDE))
+            }) { Text("Проверить вибрацию") }
         }
 
         // ---------- Безопасность ----------
