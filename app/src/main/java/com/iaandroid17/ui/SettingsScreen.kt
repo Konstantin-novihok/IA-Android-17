@@ -1,6 +1,11 @@
 package com.iaandroid17.ui
 
 import android.content.Intent
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.iaandroid17.voice.VoiceScenarioService
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -74,6 +79,14 @@ fun SettingsScreen(vm: AppViewModel) {
     val s = vm.settings
     var toDelete by remember { mutableStateOf<File?>(null) }
     var showAbout by remember { mutableStateOf(false) }
+    var listeningRequested by rememberSaveable { mutableStateOf(false) }
+    val voicePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        val mic = granted[Manifest.permission.RECORD_AUDIO] == true || context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        if (mic) {
+            context.startForegroundService(Intent(context, VoiceScenarioService::class.java).setAction(VoiceScenarioService.ACTION_START))
+            listeningRequested = true
+        }
+    }
 
     val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.importModel(uri)
@@ -199,6 +212,36 @@ fun SettingsScreen(vm: AppViewModel) {
             ) { v -> vm.update { it.copy(thinking = v) } }
         }
 
+        // ---------- Идентификация и голосовой запуск ----------
+        Section("Имя помощника и голосовой запуск") {
+            OutlinedTextField(
+                value = s.assistantName,
+                onValueChange = { v -> vm.update { it.copy(assistantName = v.take(40)) } },
+                label = { Text("Имя помощника") },
+                supportingText = { Text("Скажите это имя перед кодом: «${s.assistantName.ifBlank { "помощник" }}, код один».") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Text("Для теста доступны три безопасных сценария: 1 — произнести время; 2 — произнести дату; 3 — голосовая самопроверка. Произвольные команды и управление телефоном пока не выполняются.", style = MaterialTheme.typography.bodySmall)
+            Button(
+                onClick = {
+                    if (s.assistantName.trim().length < 2) return@Button
+                    val perms = mutableListOf(Manifest.permission.RECORD_AUDIO)
+                    if (Build.VERSION.SDK_INT >= 33) perms.add(Manifest.permission.POST_NOTIFICATIONS)
+                    voicePermissionLauncher.launch(perms.toTypedArray())
+                },
+                enabled = s.assistantName.trim().length >= 2 && !listeningRequested
+            ) { Text("Включить голосовое ожидание") }
+            OutlinedButton(
+                onClick = {
+                    context.startService(Intent(context, VoiceScenarioService::class.java).setAction(VoiceScenarioService.ACTION_STOP))
+                    listeningRequested = false
+                },
+                enabled = listeningRequested
+            ) { Text("Остановить голосовое ожидание") }
+            Text("Работает как foreground-сервис с постоянным уведомлением. Разрешите микрофон. Распознавание зависит от движка речи на телефоне; автономная работа не гарантируется. После перезапуска телефона включите ожидание вручную.", style = MaterialTheme.typography.labelSmall)
+        }
+
         // ---------- Голосовые сценарии ----------
         Section("Голосовые сценарии") {
             Text("Длительность короткого вибросигнала: ${s.scenarioPulseMs} мс", style = MaterialTheme.typography.bodyMedium)
@@ -258,7 +301,7 @@ fun SettingsScreen(vm: AppViewModel) {
 
         // ---------- О приложении ----------
         Section("О приложении") {
-            Text("IA-Android-17 · версия 0.2.0 · движок llama.cpp (b11836)", style = MaterialTheme.typography.bodySmall)
+            Text("IA-Android-17 · версия 0.3.0 · движок llama.cpp (b11836)", style = MaterialTheme.typography.bodySmall)
             if (vm.systemInfo.isNotBlank()) Text(vm.systemInfo, style = MaterialTheme.typography.labelSmall)
             OutlinedButton(onClick = { showAbout = true }) { Text("О локальной обработке") }
         }
