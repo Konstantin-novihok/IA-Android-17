@@ -659,7 +659,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 Text(when {
                     verificationBusy -> "Проверка…"
                     verificationCapture != null -> "Сравнить голос"
-                    else -> "Записать и проверить владельца"
+                    else -> if (pendingPadAttack != null) "Записать PAD-тест" else "Записать и проверить владельца"
                 })
             }
             Text("Обученная модель Anti-spoofing (AASIST)", style = MaterialTheme.typography.titleSmall)
