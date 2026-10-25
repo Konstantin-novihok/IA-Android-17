@@ -31,6 +31,8 @@ class VoiceConversationController(
     private var waitingForReply = false
     private var retryPending = false
 
+    fun isActive(): Boolean = active
+
     fun start() {
         if (active) return
         if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(appContext)) {
