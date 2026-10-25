@@ -4,7 +4,7 @@ import android.content.Intent
 import android.hardware.biometrics.BiometricPrompt
 import android.hardware.biometrics.BiometricManager
 import android.os.CancellationSignal
-import com.iaandroid17.voice.PcmAudioCapture
+import com.iaandroid17.voice.AntiSpoofingAnalyzer\nimport com.iaandroid17.voice.PcmAudioCapture
 import com.iaandroid17.voice.OwnerVoiceProfile
 import com.iaandroid17.voice.OwnerVoiceVerifier
 import com.iaandroid17.voice.VoiceSecurityAudit
@@ -553,6 +553,15 @@ fun SettingsScreen(vm: AppViewModel) {
                                 check(file != null && file.exists()) { "Файл записи отсутствует" }
                                 val quality = withContext(Dispatchers.IO) { VoiceVerificationReadiness.inspectRecording(file) }
                                 check(quality.accepted) { quality.reason }
+                                val antiSpoof = withContext(Dispatchers.IO) { AntiSpoofingAnalyzer.inspect(file.readBytes()) }
+                                VoiceSecurityAudit.record(
+                                    context,
+                                    if (antiSpoof.suspicious) "anti_spoof_suspicious" else "anti_spoof_screen_pass",
+                                    "risk=${"%.2f".format(java.util.Locale.US, antiSpoof.riskScore)}; ${antiSpoof.reasons.joinToString(",").take(80)}"
+                                )
+                                check(!antiSpoof.suspicious) {
+                                    "Anti-spoofing отклонил запись: ${antiSpoof.summary} Запишите новую фразу непосредственно в микрофон. Это эвристический фильтр, а не обученный детектор."
+                                }
                                 val slots = ownerProfile.sampleSlots
                                 check(slots.size == 3 && slots.all { ownerProfile.hasEmbedding(it) }) {
                                     "Нужны три образца владельца с рассчитанными embeddings"
@@ -653,7 +662,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 "2. Обученная модель speaker embedding" to if (embeddingModelReady) "РЕАЛИЗОВАНО: CAM++ ONNX, 512-D, fbank + mean normalization, проверка SHA-256." else "ОЖИДАЕТ УСТАНОВКИ: модель ещё не загружена.",
                 "3. Шаблон профиля и сравнение голосов" to if (ownerProfile.sampleSlots.size == 3 && ownerProfile.sampleSlots.all { ownerProfile.hasEmbedding(it) }) "РЕАЛИЗОВАНО: сравнение живой записи с тремя CAM++ embeddings; предварительный порог 0,55, не авторизационный." else "НЕ ГОТОВО: нужны три сохранённых образца и embeddings.",
                 "4. Биометрическая калибровка FAR/FRR" to if (calibrationStore.report().threshold != null) "РЕАЛИЗОВАНО ЧАСТИЧНО: порог EER рассчитан по ${calibrationStore.report().genuineCount} записям владельца и ${calibrationStore.report().impostorCount} записям других людей; только исследовательский отчёт." else "СБОР ДАННЫХ: нужны настоящие размеченные записи владельца и других людей.",
-                "5. Защита от записи/синтеза (anti-spoof)" to "НЕ ГОТОВО: детектор и проверка живости отсутствуют.",
+                "5. Защита от записи/синтеза (anti-spoof)" to "ЧАСТИЧНО: локальные эвристики уровня, clipping, повторяемости фреймов и спектральной плоскостности отклоняют часть подозрительных сигналов. Обученного PAD-классификатора и доказательства живости пока нет.",
                 "6. Допуск голосовых команд" to "ЗАКРЫТ: команды отклоняются до независимой проверки всех этапов."
             ).forEach { (title, detail) ->
                 Column {
@@ -665,7 +674,7 @@ fun SettingsScreen(vm: AppViewModel) {
             Text("Последние события безопасности:", style = MaterialTheme.typography.titleSmall)
             VoiceSecurityAudit.snapshot(context).takeLast(8).asReversed().forEach { Text(it, style = MaterialTheme.typography.labelSmall) }
             if (samples > 0) OutlinedButton(onClick = { askDeleteVoiceProfile = true }) { Text("Удалить профиль и образцы") }
-            Text("Embedding — биометрический признак, а не доказательство личности. Порог не калиброван, anti-spoofing отсутствует; голосовая авторизация команд остаётся заблокированной.", style = MaterialTheme.typography.labelSmall)
+            Text("Anti-spoof сейчас использует только эвристические признаки сигнала: он может пропустить качественный replay/TTS и ошибочно отклонить живую речь. Обученный PAD и тестирование на атаках не реализованы. Embedding и эти проверки не доказывают личность; голосовая авторизация команд остаётся заблокированной.", style = MaterialTheme.typography.labelSmall)
         }
         if (confirmDeleteSample && deleteSampleSlot != null) {
             AlertDialog(
