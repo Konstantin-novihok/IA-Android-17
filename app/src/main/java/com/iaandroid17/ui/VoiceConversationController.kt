@@ -132,13 +132,17 @@ class VoiceConversationController(
             return
         }
         val locale = Locale.getDefault()
-        if (engine.isLanguageAvailable(locale) < TextToSpeech.LANG_AVAILABLE) {
-            onStatus("Для ${locale.toLanguageTag()} нет установленного голоса TTS. Установите офлайн-голос в Android.")
+        val offlineVoice = engine.voices
+            ?.filter { !it.isNetworkConnectionRequired && (it.locale == locale || it.locale.language == locale.language) }
+            ?.maxByOrNull { if (it.locale == locale) 2 else 1 }
+        if (offlineVoice == null) {
+            onStatus("Нет установленного офлайн-голоса для ${locale.toLanguageTag()}. Установите голосовые данные TTS в настройках Android; сеть не используется.")
             scheduleListen(900)
             return
         }
-        engine.language = locale
-        onStatus("Отвечаю голосом…")
+        engine.voice = offlineVoice
+        engine.language = offlineVoice.locale
+        onStatus("Отвечаю офлайн-голосом…")
         val result = engine.speak(text.take(6000), TextToSpeech.QUEUE_FLUSH, null, UTTERANCE_ID)
         if (result == TextToSpeech.ERROR) {
             onStatus("Ошибка синтеза речи. Ответ доступен в чате.")
