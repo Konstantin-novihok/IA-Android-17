@@ -11,6 +11,10 @@ import com.iaandroid17.voice.VoiceSecurityAudit
 import com.iaandroid17.voice.VoiceVerificationReadiness
 import com.iaandroid17.voice.SpeakerEmbeddingEngine
 import com.iaandroid17.voice.SpeakerEmbeddingModelInstaller
+import com.iaandroid17.voice.SpeakerEmbeddingMath
+import com.iaandroid17.voice.VoiceCalibrationStore
+import com.iaandroid17.model.DownloadModelCatalog
+import com.iaandroid17.model.DownloadModelEntry
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -38,6 +42,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -112,6 +117,14 @@ fun SettingsScreen(vm: AppViewModel) {
     var verificationCapture by remember { mutableStateOf<PcmAudioCapture?>(null) }
     var verificationFile by remember { mutableStateOf<File?>(null) }
     var verificationNotice by remember { mutableStateOf("") }
+    var pendingCalibrationSameSpeaker by remember { mutableStateOf<Boolean?>(null) }
+    val calibrationStore = remember { VoiceCalibrationStore(context) }
+    var calibrationRevision by remember { mutableIntStateOf(0) }
+    val modelCatalogStore = remember { DownloadModelCatalog(context) }
+    var modelCatalog by remember { mutableStateOf(modelCatalogStore.list()) }
+    var newModelName by remember { mutableStateOf("") }
+    var newModelUrl by remember { mutableStateOf("") }
+    var showAdvancedDownloads by rememberSaveable { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     val enrollmentMicPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) {
@@ -165,7 +178,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 rec.start()
                 verificationFile = tmp
                 verificationCapture = rec
-                verificationNotice = "Запись для проверки владельца идёт. Произнесите обычную фразу 2–12 секунд, затем нажмите «Сравнить голос»."
+                verificationNotice = if (pendingCalibrationSameSpeaker == null) "Запись для проверки владельца идёт. Произнесите фразу 2–12 секунд, затем нажмите «Сравнить голос»." else "Запись для калибровки идёт. Метка: " + if (pendingCalibrationSameSpeaker == true) "мой голос" else "другой человек" + ". После записи нажмите «Сравнить голос»."
             } catch (e: Exception) {
                 runCatching { verificationCapture?.release() }
                 verificationCapture = null
@@ -260,21 +273,84 @@ fun SettingsScreen(vm: AppViewModel) {
         }
 
 
-        Section("Дополнительные модели — комплектная загрузка") {
-            var packageUrls by rememberSaveable { mutableStateOf("") }
-            Text("Добавьте HTTPS-ссылки на дополнительные GGUF-файлы, по одной на строку. Очередь скачивает их последовательно, пропускает уже установленные файлы и проверяет GGUF. Для Hugging Face сверяется SHA-256, если доступна контрольная сумма.", style = MaterialTheme.typography.bodySmall)
-            OutlinedTextField(
-                value = packageUrls,
-                onValueChange = { packageUrls = it.take(12000) },
-                label = { Text("Ссылки на дополнительные .gguf") },
-                placeholder = { Text("https://…/model.gguf") },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 3,
-                maxLines = 7
-            )
-            Button(onClick = { vm.downloadPackageSet(packageUrls.lines().flatMap { it.split(Regex("\\s+")) }) },
-                enabled = !vm.download.running && packageUrls.isNotBlank()) { Text("Скачать комплект") }
-            Text("Скачаются выбранные вами GGUF-модели. Это пока не установщик всех модальностей: OCR, ASR и Voice ID требуют отдельных runtime и совместимых моделей, которые ещё не интегрированы. Не загружайте случайные веса.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+        Section("Каталог дополнительных моделей") {
+            Text("Предустановлены ссылки на несколько GGUF-моделей. Можно включать/выключать модели в очереди, редактировать URL, добавлять свои и удалять ненужные. Ничего не скачивается без нажатия кнопки.", style = MaterialTheme.typography.bodySmall)
+            SwitchRow("Показывать настройки каталога", "Список моделей и ссылки", showAdvancedDownloads) { showAdvancedDownloads = it }
+            if (showAdvancedDownloads) {
+                modelCatalog.forEach { entry ->
+                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = entry.enabled,
+                                onCheckedChange = { enabled ->
+                                    modelCatalog = modelCatalog.map { if (it.id == entry.id) it.copy(enabled = enabled) else it }
+                                    modelCatalogStore.save(modelCatalog)
+                                }
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(entry.name, style = MaterialTheme.typography.bodyMedium)
+                                Text(if (entry.preset) "Предустановленная модель" else "Пользовательская модель", style = MaterialTheme.typography.labelSmall)
+                            }
+                            TextButton(onClick = {
+                                modelCatalog = modelCatalog.filterNot { it.id == entry.id }
+                                modelCatalogStore.save(modelCatalog)
+                            }) { Text("Убрать") }
+                        }
+                        OutlinedTextField(
+                            value = entry.url,
+                            onValueChange = { url ->
+                                modelCatalog = modelCatalog.map { if (it.id == entry.id) it.copy(url = url.take(2000)) else it }
+                                modelCatalogStore.save(modelCatalog)
+                            },
+                            label = { Text("URL модели · ${entry.name}") },
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 1,
+                            maxLines = 3
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = newModelName,
+                    onValueChange = { newModelName = it.take(100) },
+                    label = { Text("Название своей модели") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = newModelUrl,
+                    onValueChange = { newModelUrl = it.take(2000) },
+                    label = { Text("Прямая HTTPS-ссылка на .gguf") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 1,
+                    maxLines = 3
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = {
+                        try {
+                            modelCatalogStore.add(newModelName, newModelUrl)
+                            modelCatalog = modelCatalogStore.list()
+                            newModelName = ""
+                            newModelUrl = ""
+                        } catch (e: Exception) {
+                            vm.banner = "Модель не добавлена: ${e.message ?: "проверьте HTTPS-ссылку на .gguf"}"
+                        }
+                    }, enabled = newModelUrl.startsWith("https://", true) && newModelUrl.substringBefore('?').endsWith(".gguf", true)) { Text("Добавить модель") }
+                    TextButton(onClick = {
+                        modelCatalogStore.resetPresets()
+                        modelCatalog = modelCatalogStore.list()
+                    }) { Text("Восстановить каталог") }
+                }
+                Button(
+                    onClick = { vm.downloadPackageSet(modelCatalog.filter { it.enabled }.map { it.url }) },
+                    enabled = !vm.download.running && modelCatalog.any { it.enabled && it.url.startsWith("https://", true) && it.url.substringBefore('?').endsWith(".gguf", true) }
+                ) { Text("Скачать выбранные модели") }
+                Text("Текущая загрузка: ${vm.download.message.ifBlank { "нет" }}", style = MaterialTheme.typography.bodySmall)
+                if (vm.download.running) {
+                    if (vm.download.total > 0) LinearProgressIndicator(progress = { (vm.download.done.toFloat() / vm.download.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                    OutlinedButton(onClick = { vm.cancelDownload() }) { Text("Остановить загрузку") }
+                }
+                Text("Список содержит только прямые ссылки на GGUF. Модели ASR, TTS, vision и anti-spoof требуют отдельных совместимых движков и форматов; наличие ссылки само по себе не подключает функцию.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+            }
         }
 
         // ---------- Генерация и ресурсы ----------
@@ -456,7 +532,7 @@ fun SettingsScreen(vm: AppViewModel) {
             if (embeddingBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (embeddingNotice.isNotBlank()) Text(embeddingNotice, style = MaterialTheme.typography.bodySmall)
             Text("Проверка владельца по голосу", style = MaterialTheme.typography.titleSmall)
-            Text("Проверка использует новую живую запись с микрофона, CAM++ embedding и cosine similarity с сохранёнными векторами. Нужны 3 записанных образца и embeddings для всех трёх. Порог 0,55 — предварительный, не откалиброван; результат не открывает доступ к командам.", style = MaterialTheme.typography.bodySmall)
+            Text("Проверка использует новую живую запись с микрофона, CAM++ embedding и cosine similarity с сохранёнными векторами. Нужны 3 записанных образца и embeddings для всех трёх. Порог по умолчанию остаётся предварительным до калибровки.", style = MaterialTheme.typography.bodySmall)
             Button(
                 onClick = {
                     if (verificationCapture != null) {
@@ -475,24 +551,35 @@ fun SettingsScreen(vm: AppViewModel) {
                                 check(slots.size == 3 && slots.all { ownerProfile.hasEmbedding(it) }) {
                                     "Нужны три образца владельца с рассчитанными embeddings"
                                 }
-                                val result = withContext(Dispatchers.IO) {
+                                val computed = withContext(Dispatchers.IO) {
                                     SpeakerEmbeddingEngine(context).use { engine ->
                                         val candidate = engine.embed(file.readBytes())
                                         val enrolled = slots.map { ownerProfile.readEmbedding(it) }
-                                        OwnerVoiceVerifier.compare(candidate, enrolled)
+                                        val scores = enrolled.map { SpeakerEmbeddingMath.cosine(candidate, it) }
+                                        Triple(OwnerVoiceVerifier.compare(candidate, enrolled), scores.average().toFloat(), candidate.size)
                                     }
                                 }
-                                VoiceSecurityAudit.record(
-                                    context,
-                                    if (result.acceptedAsLikelyOwner) "voice_match_candidate" else "voice_match_rejected",
-                                    "mean=${"%.3f".format(java.util.Locale.US, result.meanSimilarity)}; best=${"%.3f".format(java.util.Locale.US, result.bestSimilarity)}; matched=${result.matchedSamples}/${result.totalSamples}; provisional"
-                                )
-                                if (!result.acceptedAsLikelyOwner) {
-                                    VoiceVerificationReadiness.recordDenial(context, "voice similarity below provisional threshold")
+                                val calibrationLabel = pendingCalibrationSameSpeaker
+                                if (calibrationLabel != null) {
+                                    calibrationStore.add(computed.second, calibrationLabel)
+                                    calibrationRevision++
+                                    VoiceSecurityAudit.record(context, "voice_calibration_trial", "label=${if (calibrationLabel) "genuine" else "impostor"}; score=${"%.4f".format(java.util.Locale.US, computed.second)}")
+                                    val report = calibrationStore.report()
+                                    verificationNotice = "Калибровочная запись сохранена: ${if (calibrationLabel) "владелец" else "другой человек"}, score ${"%.3f".format(java.util.Locale.US, computed.second)}. Всего: владелец ${report.genuineCount}, другой человек ${report.impostorCount}. " + report.note
+                                } else {
+                                    val result = computed.first
+                                    VoiceSecurityAudit.record(
+                                        context,
+                                        if (result.acceptedAsLikelyOwner) "voice_match_candidate" else "voice_match_rejected",
+                                        "mean=${"%.3f".format(java.util.Locale.US, result.meanSimilarity)}; best=${"%.3f".format(java.util.Locale.US, result.bestSimilarity)}; matched=${result.matchedSamples}/${result.totalSamples}; provisional"
+                                    )
+                                    if (!result.acceptedAsLikelyOwner) {
+                                        VoiceVerificationReadiness.recordDenial(context, "voice similarity below provisional threshold")
+                                    }
+                                    verificationNotice = (if (result.acceptedAsLikelyOwner) "ГОЛОС ПОХОЖ НА ПРОФИЛЬ" else "СОВПАДЕНИЕ НЕ ПОДТВЕРЖДЕНО") +
+                                        ": средняя похожесть ${"%.3f".format(java.util.Locale.US, result.meanSimilarity)}, лучший образец ${"%.3f".format(java.util.Locale.US, result.bestSimilarity)}, совпало ${result.matchedSamples}/${result.totalSamples}. " +
+                                        "Это не авторизация."
                                 }
-                                verificationNotice = (if (result.acceptedAsLikelyOwner) "ГОЛОС ПОХОЖ НА ПРОФИЛЬ" else "СОВПАДЕНИЕ НЕ ПОДТВЕРЖДЕНО") +
-                                    ": средняя похожесть ${"%.3f".format(java.util.Locale.US, result.meanSimilarity)}, лучший образец ${"%.3f".format(java.util.Locale.US, result.bestSimilarity)}, совпало ${result.matchedSamples}/${result.totalSamples}. " +
-                                    "Порог ${result.threshold} предварительный. Это не авторизация."
                             } catch (e: Exception) {
                                 VoiceSecurityAudit.record(context, "voice_check_error", e.javaClass.simpleName)
                                 verificationNotice = "Проверка не выполнена: ${e.message ?: e.javaClass.simpleName}"
@@ -504,6 +591,7 @@ fun SettingsScreen(vm: AppViewModel) {
                             }
                         }
                     } else {
+                        pendingCalibrationSameSpeaker = null
                         verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 },
@@ -514,6 +602,40 @@ fun SettingsScreen(vm: AppViewModel) {
                     verificationCapture != null -> "Сравнить голос"
                     else -> "Записать и проверить владельца"
                 })
+            }
+            Text("Калибровка на настоящих записях", style = MaterialTheme.typography.titleSmall)
+            Text("Собирайте независимые записи: свои фразы с меткой «Мой голос» и добровольно предоставленные записи другого человека с меткой «Другой человек». Аудио после расчёта удаляется; сохраняются только метка и score. Не используйте синтезированные/пересланные записи как замену полноценному anti-spoof тестированию.", style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        pendingCalibrationSameSpeaker = true
+                        verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+                    },
+                    enabled = !verificationBusy && verificationCapture == null && samples == 3 && ownerProfile.sampleSlots.all { ownerProfile.hasEmbedding(it) } && embeddingModelReady
+                ) { Text("Записать мой голос") }
+                OutlinedButton(
+                    onClick = {
+                        pendingCalibrationSameSpeaker = false
+                        verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+                    },
+                    enabled = !verificationBusy && verificationCapture == null && samples == 3 && ownerProfile.sampleSlots.all { ownerProfile.hasEmbedding(it) } && embeddingModelReady
+                ) { Text("Записать другого") }
+            }
+            val calibration = calibrationStore.report()
+            Text("Набор записей: владелец ${calibration.genuineCount}, другие люди ${calibration.impostorCount}", style = MaterialTheme.typography.bodyMedium)
+            if (calibration.threshold != null) {
+                Text(
+                    "Исследовательский порог EER: ${"%.3f".format(java.util.Locale.US, calibration.threshold)} · FAR ${"%.1f".format(java.util.Locale.US, calibration.far!! * 100)}% · FRR ${"%.1f".format(java.util.Locale.US, calibration.frr!! * 100)}% · EER ${"%.1f".format(java.util.Locale.US, calibration.eer!! * 100)}%",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Text(calibration.note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
+                    calibrationStore.clear()
+                    calibrationRevision++
+                    verificationNotice = "Набор калибровки очищен."
+                }, enabled = calibration.genuineCount + calibration.impostorCount > 0 && !verificationBusy) { Text("Очистить набор") }
             }
             if (verificationNotice.isNotBlank()) Text(verificationNotice, style = MaterialTheme.typography.bodySmall, color = if (verificationNotice.startsWith("ГОЛОС ПОХОЖ")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
             if (verificationBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
