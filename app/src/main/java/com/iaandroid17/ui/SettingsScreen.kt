@@ -212,6 +212,17 @@ fun SettingsScreen(vm: AppViewModel) {
             ) { v -> vm.update { it.copy(thinking = v) } }
         }
 
+        // ---------- Оформление ----------
+        Section("Тема и цветовая гамма") {
+            listOf("system" to "Системная / динамическая", "indigo" to "Индиго", "forest" to "Лесная", "sunset" to "Закат").forEach { (id, label) ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = s.themeStyle == id, onClick = { vm.update { it.copy(themeStyle = id) } })
+                    Text(label, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            Text("Цвета применяются сразу. Встроенные палитры адаптируются к светлому или тёмному режиму Android.", style = MaterialTheme.typography.labelSmall)
+        }
+
         // ---------- Идентификация и голосовой запуск ----------
         Section("Имя помощника и голосовой запуск") {
             OutlinedTextField(
