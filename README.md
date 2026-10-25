@@ -72,3 +72,24 @@ CI выполняет сборку APK на GitHub Actions. Успешная к�
 - Доступно удаление профиля и ключа, после чего возможна новая регистрация.
 - **Voice ID/speaker verification не реализован.** Сбор и шифрование образцов не являются идентификацией владельца. Поэтому голосовые коды распознаются, но сценарии fail-closed блокируются с голосовым уведомлением до подключения и валидации модели проверки говорящего.
 - Распознавание фразы «имя помощника + код» само по себе не предотвращает воспроизведение или синтез голоса.
+
+
+## Voice ID security gate (current branch)
+
+**Security mode: chat only. Voice command execution is disabled**, both while unlocked and while locked, until a real owner speaker verifier is integrated, validated, and tested. The foreground service now fails closed before opening a recognition session.
+
+The owner setup screen can collect three enrollment recordings encrypted with AES-GCM using an Android Keystore key. These clips are enrollment material only; they are **not** speaker embeddings and do not establish identity.
+
+| # | Requirement | Current status |
+|---:|---|---|
+| 1 | Speaker embedding extraction | Not implemented |
+| 2 | Compare live voice to owner profile | Not implemented |
+| 3 | Calibrated accept/reject threshold | Not calibrated |
+| 4 | Recording-quality validation | Not implemented |
+| 5 | Replay/synthetic voice detection | Not implemented |
+| 6 | Owner-confirmed profile reset/re-enrollment | System biometric/device credential confirmation is present for reset |
+| 7 | Audit decisions/failures and resist repeated attempts | Bounded local audit log added; attempt rate-limiter not integrated |
+
+The log avoids saving audio and recognized phrases. A successful enrollment or name match must never be interpreted as successful identity verification.
+
+Before unlocking voice actions, integrate a dedicated on-device speaker-verification model and validate thresholds against false-accept/false-reject measurements, noisy and distant speech, playback attacks, synthetic speech, and real handset microphones. Keep consequential actions separately confirmed even after Voice ID passes.
