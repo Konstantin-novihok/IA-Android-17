@@ -5,6 +5,19 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -34,7 +47,35 @@ fun IaApp(vm: AppViewModel) {
     }
     MaterialTheme(colorScheme = scheme) {
         var tab by rememberSaveable { mutableIntStateOf(0) }
-        Scaffold(
+        if (vm.settings.assistantName.isBlank()) {
+            var alias by rememberSaveable { mutableStateOf("") }
+            Surface(Modifier.fillMaxSize()) {
+                Column(
+                    Modifier.fillMaxSize().padding(28.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("IA", style = MaterialTheme.typography.displayLarge, color = MaterialTheme.colorScheme.primary)
+                    Text("Давайте познакомимся", style = MaterialTheme.typography.headlineSmall)
+                    Spacer(Modifier.height(10.dp))
+                    Text("Назовите своего помощника. Это имя будет началом голосовой команды.")
+                    Spacer(Modifier.height(18.dp))
+                    OutlinedTextField(
+                        value = alias,
+                        onValueChange = { alias = it.take(40) },
+                        label = { Text("Имя помощника") },
+                        placeholder = { Text("Например, Алекс") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = { vm.update { it.copy(assistantName = alias.trim()) } }, enabled = alias.trim().length >= 2) {
+                        Text("Продолжить")
+                    }
+                    Text("Имя можно изменить позже в настройках.", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        } else Scaffold(
             bottomBar = {
                 NavigationBar {
                     NavigationBarItem(selected = tab == 0, onClick = { tab = 0 }, icon = { Text("💬") }, label = { Text("Помощник") })
