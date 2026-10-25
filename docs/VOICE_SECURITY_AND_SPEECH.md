@@ -6,6 +6,8 @@
 - Input contract: mono PCM16, 16 kHz; deterministic first-64,600-sample window (~4.04 s); short clips are tiled to match the upstream padding routine.
 - Output contract: two class logits; index 0 = spoof, index 1 = bona fide, following the model card. The current 0.5 softmax operating point is provisional, not a calibrated security threshold.
 - Additional signal heuristics run after AASIST. Any rejection prevents speaker comparison for that attempt.
+- Settings include a PAD field-test mode with separate live, loudspeaker replay, TTS, voice-clone and voice-conversion labels. It stores only scores/labels and shows FAR/FRR at the selected threshold.
+- The threshold slider is an experimental operating point, not an authorization threshold. Lower thresholds reduce false rejects but increase false accepts.
 - Chat speech output uses Android `TextToSpeech`; tap **Озвучить** on an assistant answer.
 - Chat speech input launches Android `RecognizerIntent`; the recognized transcript is placed into the composer and is not sent until the user taps Send.
 
