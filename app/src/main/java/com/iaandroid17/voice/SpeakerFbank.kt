@@ -9,6 +9,8 @@ import kotlin.math.sin
 
 /**
  * Kaldi-style 80-bin log-mel filterbank for the CAM++ checkpoint used by SpeakerEmbeddingEngine.
+ * Adapted from the Apache-2.0-licensed Fbank implementation in https://github.com/adgapar/teya;
+ * see licenses/Apache-2.0-teya-filterbank.txt. Feature math follows Kaldi.
  * Audio is 16 kHz mono float in [-1,1]. Config follows the checkpoint's sherpa-onnx feature
  * defaults: 25 ms frames, 10 ms shift, Povey window, no dither, pre-emphasis 0.97, DC removal,
  * 20 Hz .. Nyquist-400 Hz. Keep this pipeline coupled to the pinned model revision.
