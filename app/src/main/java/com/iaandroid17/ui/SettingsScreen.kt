@@ -640,6 +640,32 @@ fun SettingsScreen(vm: AppViewModel) {
                     else -> "Записать и проверить владельца"
                 })
             }
+            Text("Обученная модель Anti-spoofing (AASIST)", style = MaterialTheme.typography.titleSmall)
+            Text("Лицензия MIT · ONNX · около 1,62 МБ · моно 16 кГц, окно 4,04 с. После загрузки работает локально. Порог предварительный; модель не гарантирует обнаружение качественного клонирования.", style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = {
+                    scope.launch {
+                        padBusy = true
+                        padNotice = "Загрузка и проверка SHA-256…"
+                        try {
+                            withContext(Dispatchers.IO) { AntiSpoofModelInstaller.download(context) }
+                            padReady = AntiSpoofModelInstaller.isInstalled(context)
+                            padNotice = if (padReady) "AASIST установлен; SHA-256 подтверждён." else "Модель не прошла проверку."
+                        } catch (e: Exception) {
+                            padNotice = "Не удалось установить AASIST: " + (e.message ?: e.javaClass.simpleName)
+                        } finally { padBusy = false }
+                    }
+                }, enabled = !padBusy && s.allowNetwork) {
+                    Text(if (padBusy) "Загрузка…" else if (padReady) "Проверить AASIST" else "Скачать AASIST (~1,6 МБ)")
+                }
+                if (padReady) OutlinedButton(onClick = {
+                    padReady = AntiSpoofModelInstaller.isInstalled(context)
+                    padNotice = if (padReady) "SHA-256 корректен." else "Файл отсутствует или повреждён."
+                }, enabled = !padBusy) { Text("Проверить") }
+            }
+            if (padBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (padNotice.isNotBlank()) Text(padNotice, style = MaterialTheme.typography.bodySmall)
+            Text(if (padReady) "Статус PAD: модель установлена и проверена." else "Статус PAD: модель не установлена; проверка голоса недоступна.", style = MaterialTheme.typography.labelSmall, color = if (padReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
             Text("Калибровка на настоящих записях", style = MaterialTheme.typography.titleSmall)
             Text("Собирайте независимые записи: свои фразы с меткой «Мой голос» и добровольно предоставленные записи другого человека с меткой «Другой человек». Аудио после расчёта удаляется; сохраняются только метка и score. Не используйте синтезированные/пересланные записи как замену полноценному anti-spoof тестированию.", style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -682,7 +708,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 "2. Обученная модель speaker embedding" to if (embeddingModelReady) "РЕАЛИЗОВАНО: CAM++ ONNX, 512-D, fbank + mean normalization, проверка SHA-256." else "ОЖИДАЕТ УСТАНОВКИ: модель ещё не загружена.",
                 "3. Шаблон профиля и сравнение голосов" to if (ownerProfile.sampleSlots.size == 3 && ownerProfile.sampleSlots.all { ownerProfile.hasEmbedding(it) }) "РЕАЛИЗОВАНО: сравнение живой записи с тремя CAM++ embeddings; предварительный порог 0,55, не авторизационный." else "НЕ ГОТОВО: нужны три сохранённых образца и embeddings.",
                 "4. Биометрическая калибровка FAR/FRR" to if (calibrationStore.report().threshold != null) "РЕАЛИЗОВАНО ЧАСТИЧНО: порог EER рассчитан по ${calibrationStore.report().genuineCount} записям владельца и ${calibrationStore.report().impostorCount} записям других людей; только исследовательский отчёт." else "СБОР ДАННЫХ: нужны настоящие размеченные записи владельца и других людей.",
-                "5. Защита от записи/синтеза (anti-spoof)" to "ЧАСТИЧНО: локальные эвристики уровня, clipping, повторяемости фреймов и спектральной плоскостности отклоняют часть подозрительных сигналов. Обученного PAD-классификатора и доказательства живости пока нет.",
+                "5. Защита от записи/синтеза (anti-spoof)" to if (padReady) "ЧАСТИЧНО РЕАЛИЗОВАНО: обученная AASIST ONNX + эвристики. Порог предварительный; независимая проверка на телефоне и тесты атак ещё нужны." else "ОЖИДАЕТ УСТАНОВКИ: обученная модель AASIST ONNX не установлена. Голосовая авторизация закрыта.",
                 "6. Допуск голосовых команд" to "ЗАКРЫТ: команды отклоняются до независимой проверки всех этапов."
             ).forEach { (title, detail) ->
                 Column {
@@ -694,7 +720,7 @@ fun SettingsScreen(vm: AppViewModel) {
             Text("Последние события безопасности:", style = MaterialTheme.typography.titleSmall)
             VoiceSecurityAudit.snapshot(context).takeLast(8).asReversed().forEach { Text(it, style = MaterialTheme.typography.labelSmall) }
             if (samples > 0) OutlinedButton(onClick = { askDeleteVoiceProfile = true }) { Text("Удалить профиль и образцы") }
-            Text("Anti-spoof сейчас использует только эвристические признаки сигнала: он может пропустить качественный replay/TTS и ошибочно отклонить живую речь. Обученный PAD и тестирование на атаках не реализованы. Embedding и эти проверки не доказывают личность; голосовая авторизация команд остаётся заблокированной.", style = MaterialTheme.typography.labelSmall)
+            Text("AASIST — обученный детектор риска подделки, а не доказательство живого присутствия. Он может пропускать современные TTS/voice cloning и ошибаться на живой речи. Порог 0,5 предварительный; независимая калибровка и тестирование на устройстве ещё нужны. Голосовая авторизация команд остаётся заблокированной.", style = MaterialTheme.typography.labelSmall)
         }
         if (confirmDeleteSample && deleteSampleSlot != null) {
             AlertDialog(
