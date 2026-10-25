@@ -61,3 +61,14 @@ Voice verification is not a substitute for Android device credentials for action
 - Workflow now runs `:app:testDebugUnitTest` before building APK.
 
 These utilities do not constitute a deployed speaker embedding model, liveness detector, or calibrated biometric authentication. A passing unit test only validates code behavior on synthetic data.
+
+
+## Enrollment stability fixes
+
+- Occupied slots are discovered explicitly and reused after an individual clip deletion; next slot is not derived from count.
+- Settings lists saved clips and provides a separate delete action for each.
+- Delete failures become visible status text instead of escaping a UI callback.
+- Voice ID readiness is separated into implementation gates; recording signal acceptance is not biometric calibration.
+- Stored clips are raw PCM16 mono 16 kHz; accepted lengths are 2–12 seconds (64,000–384,000 bytes).
+
+These storage/UI fixes do not make voice authentication ready. The trained verifier, validated anti-spoofing and empirical threshold remain absent; protected commands remain disabled.

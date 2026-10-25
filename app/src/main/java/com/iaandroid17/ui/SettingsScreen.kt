@@ -95,11 +95,14 @@ fun SettingsScreen(vm: AppViewModel) {
     var tempRecording by remember { mutableStateOf<File?>(null) }
     var profileNotice by remember { mutableStateOf("") }
     var askDeleteVoiceProfile by remember { mutableStateOf(false) }
+    var deleteSampleSlot by remember { mutableStateOf<Int?>(null) }
+    var confirmDeleteSample by remember { mutableStateOf(false) }
     val enrollmentMicPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) {
-            val slot = (samples + 1).coerceAtMost(3)
+            val slot = ownerProfile.nextAvailableSlot()
             try {
-                val tmp = File(context.cacheDir, "owner-enroll-$slot.pcm")
+                if (slot == null) { profileNotice = "Все три слота заполнены. Удалите один из образцов."; return@rememberLauncherForActivityResult }
+                val tmp = File(context.cacheDir, "owner-enroll-$slot-${System.currentTimeMillis()}.pcm")
                 val rec = PcmAudioCapture()
                 rec.setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
                 rec.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
@@ -329,11 +332,61 @@ fun SettingsScreen(vm: AppViewModel) {
                 }
             }
             if (samples == 3) Text("Три PCM-образца собраны и защищены шифрованием на устройстве. Из них пока не извлекается обученный speaker embedding; голосовая авторизация команд отключена.", style = MaterialTheme.typography.bodyMedium)
+            if (samples > 0) {
+                Text("Сохранённые образцы", style = MaterialTheme.typography.titleSmall)
+                ownerProfile.sampleSlots.forEach { slot ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Образец $slot", style = MaterialTheme.typography.bodyMedium)
+                            Text("Зашифрован", style = MaterialTheme.typography.labelSmall)
+                        }
+                        TextButton(onClick = { deleteSampleSlot = slot; confirmDeleteSample = true }) { Text("Удалить") }
+                    }
+                }
+            }
+            Text("Этапы Voice ID", style = MaterialTheme.typography.titleSmall)
+            listOf(
+                "1. Запись PCM и базовые проверки сигнала" to "Доступно: длительность, уровень, clipping.",
+                "2. Обученная модель speaker embedding" to "НЕ ГОТОВО: модель и извлечение признаков не интегрированы.",
+                "3. Шаблон профиля и сравнение голосов" to "НЕ ГОТОВО: сходство с текущим голосом не рассчитывается.",
+                "4. Биометрическая калибровка FAR/FRR" to "НЕ ГОТОВО: нет размеченных измерений и подтверждённого порога.",
+                "5. Защита от записи/синтеза (anti-spoof)" to "НЕ ГОТОВО: детектор и проверка живости отсутствуют.",
+                "6. Допуск голосовых команд" to "ЗАКРЫТ: команды отклоняются до независимой проверки всех этапов."
+            ).forEach { (title, detail) ->
+                Column {
+                    Text(title, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                    Text(detail, style = MaterialTheme.typography.labelSmall, color = if (title.startsWith("1.")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                }
+            }
             if (profileNotice.isNotBlank()) Text(profileNotice, style = MaterialTheme.typography.bodySmall)
             Text("Последние события безопасности:", style = MaterialTheme.typography.titleSmall)
             VoiceSecurityAudit.snapshot(context).takeLast(8).asReversed().forEach { Text(it, style = MaterialTheme.typography.labelSmall) }
             if (samples > 0) OutlinedButton(onClick = { askDeleteVoiceProfile = true }) { Text("Удалить профиль и образцы") }
             Text("Шифрование защищает сохранённые образцы, но не подтверждает личность. Проверка качества PCM не распознаёт владельца, не обнаруживает воспроизведение или синтез и не доказывает живой голос. Пока не подключена обученная модель speaker verification с проверенной калибровкой и anti-spoof; запуск команд по голосу заблокирован.", style = MaterialTheme.typography.labelSmall)
+        }
+        if (confirmDeleteSample && deleteSampleSlot != null) {
+            AlertDialog(
+                onDismissRequest = { confirmDeleteSample = false; deleteSampleSlot = null },
+                title = { Text("Удалить образец #$deleteSampleSlot?") },
+                text = { Text("Будет удалён только выбранный образец. Остальные сохранённые записи останутся.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val slot = deleteSampleSlot
+                        try {
+                            if (slot != null && ownerProfile.deleteSample(slot)) {
+                                samples = ownerProfile.sampleCount
+                                profileNotice = "Образец #$slot удалён."
+                            } else profileNotice = "Образец уже отсутствует или не удалось его удалить."
+                        } catch (e: Exception) {
+                            profileNotice = "Не удалось удалить образец: " + (e.message ?: e.javaClass.simpleName)
+                        } finally {
+                            confirmDeleteSample = false
+                            deleteSampleSlot = null
+                        }
+                    }) { Text("Удалить") }
+                },
+                dismissButton = { TextButton(onClick = { confirmDeleteSample = false; deleteSampleSlot = null }) { Text("Отмена") } }
+            )
         }
         if (askDeleteVoiceProfile) {
             AlertDialog(
@@ -357,13 +410,18 @@ fun SettingsScreen(vm: AppViewModel) {
                                     profileNotice = "Подтверждение отменено. Профиль сохранён."
                                 }
                             }
-                            val prompt = BiometricPrompt.Builder(context)
-                                .setTitle("Подтвердите владельца")
-                                .setSubtitle("Повторная регистрация голосового профиля")
-                                .setDescription("Подтвердите удаление старых образцов системной биометрией или PIN-кодом.")
-                                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
-                                .build()
-                            prompt.authenticate(CancellationSignal(), context.mainExecutor, callback)
+                            try {
+                                val prompt = BiometricPrompt.Builder(context)
+                                    .setTitle("Подтвердите владельца")
+                                    .setSubtitle("Повторная регистрация голосового профиля")
+                                    .setDescription("Подтвердите удаление старых образцов системной биометрией или PIN-кодом.")
+                                    .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                                    .build()
+                                prompt.authenticate(CancellationSignal(), context.mainExecutor, callback)
+                            } catch (e: Exception) {
+                                profileNotice = "Системное подтверждение недоступно: " + (e.message ?: e.javaClass.simpleName) + ". Профиль не изменён."
+                                VoiceSecurityAudit.record(context, "profile_delete_confirmation_error", e.javaClass.simpleName)
+                            }
                         } else {
                             profileNotice = "Не удалось запросить проверку владельца. Профиль сохранён."
                         }

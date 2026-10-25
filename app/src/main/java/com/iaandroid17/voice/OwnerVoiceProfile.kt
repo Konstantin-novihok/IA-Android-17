@@ -22,17 +22,33 @@ class OwnerVoiceProfile(private val context: Context) {
     private val folder = File(context.noBackupFilesDir, "owner_voice").apply { mkdirs() }
     private val prefs = context.getSharedPreferences("owner_voice_profile", Context.MODE_PRIVATE)
 
-    val isRegistered: Boolean get() = (1..3).all { File(folder, "sample_$it.bin").exists() }
-    val sampleCount: Int get() = (1..3).count { File(folder, "sample_$it.bin").exists() }
+    val sampleSlots: List<Int> get() = (1..3).filter { sampleFile(it).isFile && sampleFile(it).length() > 0L }
+    val sampleCount: Int get() = sampleSlots.size
+    val isRegistered: Boolean get() = sampleCount == 3
+    fun nextAvailableSlot(): Int? = (1..3).firstOrNull { it !in sampleSlots }
+    fun hasSample(slot: Int): Boolean = slot in 1..3 && sampleFile(slot).isFile && sampleFile(slot).length() > 0L
+    fun deleteSample(slot: Int): Boolean {
+        require(slot in 1..3) { "Номер образца должен быть 1..3" }
+        val file = sampleFile(slot)
+        if (!file.exists()) return false
+        val deleted = file.delete()
+        if (deleted) {
+            if (sampleCount == 0) prefs.edit().remove("label").apply()
+            VoiceSecurityAudit.record(context, "enrollment_sample_deleted", "slot=$slot")
+        }
+        return deleted
+    }
+    private fun sampleFile(slot: Int): File = File(folder, "sample_$slot.bin")
     val registrationLabel: String get() = prefs.getString("label", "") ?: ""
 
     fun saveEnrollmentClip(slot: Int, pcmOrContainer: ByteArray) {
         require(slot in 1..3)
-        require(pcmOrContainer.size in 2048..12_000_000)
+        require(pcmOrContainer.size in 64_000..384_000) { "Ожидается PCM16 mono 16 кГц длительностью 2–12 секунд" }
+        require(!hasSample(slot)) { "Слот $slot уже занят. Сначала удалите этот образец." }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
         val encrypted = cipher.doFinal(pcmOrContainer)
-        FileOutputStream(File(folder, "sample_$slot.bin")).use { out ->
+        FileOutputStream(sampleFile(slot)).use { out ->
             out.write(byteArrayOf(cipher.iv.size.toByte()))
             out.write(cipher.iv)
             out.write(encrypted)
@@ -43,7 +59,7 @@ class OwnerVoiceProfile(private val context: Context) {
 
     /** Explicit user reset erases encrypted exemplars and the local key. */
     fun deleteProfile() {
-        (1..3).forEach { File(folder, "sample_$it.bin").delete() }
+        (1..3).forEach { sampleFile(it).delete() }
         folder.listFiles()?.forEach { it.delete() }
         prefs.edit().clear().apply()
         try {
