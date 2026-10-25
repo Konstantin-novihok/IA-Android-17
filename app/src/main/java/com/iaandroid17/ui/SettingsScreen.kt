@@ -3,6 +3,7 @@ package com.iaandroid17.ui
 import android.content.Intent
 import android.media.MediaRecorder
 import android.hardware.biometrics.BiometricPrompt
+import android.hardware.biometrics.BiometricManager
 import android.os.CancellationSignal
 import com.iaandroid17.voice.OwnerVoiceProfile
 import android.Manifest
@@ -306,7 +307,7 @@ fun SettingsScreen(vm: AppViewModel) {
                             .setTitle("Подтвердите владельца")
                             .setSubtitle("Повторная регистрация голосового профиля")
                             .setDescription("Подтвердите удаление старых голосовых образцов системной биометрией или PIN-кодом.")
-                            .setAllowedAuthenticators(BiometricPrompt.AUTHENTICATION_RESULT_TYPE_BIOMETRIC or BiometricPrompt.AUTHENTICATION_RESULT_TYPE_DEVICE_CREDENTIAL)
+                            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
                             .build()
                         prompt.authenticate(CancellationSignal(), context.mainExecutor, object : BiometricPrompt.AuthenticationCallback() {
                             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
