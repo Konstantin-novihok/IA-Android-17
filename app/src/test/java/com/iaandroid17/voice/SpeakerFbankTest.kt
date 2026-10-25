@@ -11,7 +11,7 @@ class SpeakerFbankTest {
         val samples = FloatArray(48_000) { i -> (0.2 * sin(2.0 * PI * 440.0 * i / 16_000.0)).toFloat() }
         val frames = SpeakerFbank().compute(samples)
         assertEquals(300, frames.size)
-        assertTrue(frames.all { it.size == 80 && it.all(Float::isFinite) })
+        assertTrue(frames.all { it.size == 80 && it.all { value -> value.isFinite() } })
     }
 
     @Test fun rejectsTooShortAudio() {
