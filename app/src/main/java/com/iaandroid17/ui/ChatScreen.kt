@@ -1,6 +1,8 @@
 package com.iaandroid17.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
 import androidx.compose.runtime.DisposableEffect
@@ -53,13 +55,26 @@ fun ChatScreen(vm: AppViewModel, onOpenSettings: () -> Unit) {
     val context = LocalContext.current
     var ttsReady by remember { mutableStateOf(false) }
     var autoSpeak by rememberSaveable { mutableStateOf(false) }
+    var voiceMode by rememberSaveable { mutableStateOf(false) }
+    var voiceStatus by remember { mutableStateOf("") }
+    val voiceController = remember(context, vm) { VoiceConversationController(context, vm) { voiceStatus = it } }
+    DisposableEffect(voiceController) { onDispose { voiceController.close() } }
+    val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            voiceController.start()
+            voiceMode = voiceController.isActive()
+        } else {
+            voiceMode = false
+            voiceStatus = "Разрешите доступ к микрофону для голосового диалога."
+        }
+    }
     var lastAutoSpokenId by rememberSaveable { mutableStateOf(-1L) }
     val tts = remember { TextToSpeech(context) { status -> ttsReady = status == TextToSpeech.SUCCESS } }
     DisposableEffect(tts) { onDispose { tts.stop(); tts.shutdown() } }
     val latestMessage = vm.messages.lastOrNull()
     LaunchedEffect(latestMessage?.id, latestMessage?.streaming, ttsReady, autoSpeak) {
         val latest = latestMessage
-        if (autoSpeak && ttsReady && latest != null && latest.role == Role.ASSISTANT && !latest.streaming && !latest.error && latest.id != lastAutoSpokenId) {
+        if (autoSpeak && !voiceMode && ttsReady && latest != null && latest.role == Role.ASSISTANT && !latest.streaming && !latest.error && latest.id != lastAutoSpokenId) {
             val answer = ChatFormat.parse(latest.raw).answer
             val locale = Locale.getDefault()
             if (answer.isNotBlank() && tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE) {
@@ -82,7 +97,25 @@ fun ChatScreen(vm: AppViewModel, onOpenSettings: () -> Unit) {
 
     Column(Modifier.fillMaxSize().imePadding()) {
         EngineStatusCard(vm, onOpenSettings)
-        TextButton(onClick = { autoSpeak = !autoSpeak; if (!autoSpeak) lastAutoSpokenId = vm.messages.lastOrNull()?.id ?: -1L }) { Text(if (autoSpeak) "Автоозвучивание: включено" else "Автоозвучивание: выключено") }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = {
+                if (voiceMode) {
+                    voiceController.stop()
+                    voiceMode = false
+                } else if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                    voiceController.start()
+                    voiceMode = voiceController.isActive()
+                } else {
+                    microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            }) { Text(if (voiceMode) "■ Остановить диалог" else "🎙 Голосовой диалог") }
+            TextButton(onClick = { autoSpeak = !autoSpeak; if (!autoSpeak) lastAutoSpokenId = vm.messages.lastOrNull()?.id ?: -1L }) {
+                Text(if (autoSpeak) "Автоозвучивание: вкл." else "Автоозвучивание: выкл.")
+            }
+        }
+        if (voiceStatus.isNotBlank()) {
+            Text(voiceStatus, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp), style = MaterialTheme.typography.bodySmall)
+        }
 
         if (vm.banner.isNotBlank()) {
             Card(
