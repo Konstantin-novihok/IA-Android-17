@@ -7,6 +7,7 @@ import android.os.CancellationSignal
 import com.iaandroid17.voice.AntiSpoofingAnalyzer
 import com.iaandroid17.voice.AntiSpoofingEngine
 import com.iaandroid17.voice.AntiSpoofModelInstaller
+import com.iaandroid17.voice.VoicePadEvaluationStore
 import com.iaandroid17.voice.PcmAudioCapture
 import com.iaandroid17.voice.OwnerVoiceProfile
 import com.iaandroid17.voice.OwnerVoiceVerifier
@@ -125,6 +126,9 @@ fun SettingsScreen(vm: AppViewModel) {
     var padReady by remember { mutableStateOf(AntiSpoofModelInstaller.isInstalled(context)) }
     var padBusy by remember { mutableStateOf(false) }
     var padNotice by remember { mutableStateOf("") }
+    var pendingPadAttack by remember { mutableStateOf<Boolean?>(null) }
+    val padEvaluationStore = remember { VoicePadEvaluationStore(context) }
+    var padEvaluationRevision by remember { mutableStateOf(0) }
     var verificationBusy by remember { mutableStateOf(false) }
     var verificationCapture by remember { mutableStateOf<PcmAudioCapture?>(null) }
     var verificationFile by remember { mutableStateOf<File?>(null) }
@@ -190,7 +194,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 rec.start()
                 verificationFile = tmp
                 verificationCapture = rec
-                verificationNotice = if (pendingCalibrationSameSpeaker == null) "Запись для проверки владельца идёт. Произнесите фразу 2–12 секунд, затем нажмите «Сравнить голос»." else "Запись для калибровки идёт. Метка: " + (if (pendingCalibrationSameSpeaker == true) "мой голос" else "другой человек") + ". После записи нажмите «Сравнить голос»."
+                verificationNotice = when { pendingPadAttack != null -> "ТЕСТ PAD: " + (if (pendingPadAttack == true) "атака — воспроизведите TTS/запись/клонированный голос через отдельный динамик" else "живая речь непосредственно в микрофон") + ". После 4–12 секунд нажмите «Сравнить голос»."; pendingCalibrationSameSpeaker == null -> "Запись для проверки владельца идёт. Произнесите фразу 2–12 секунд, затем нажмите «Сравнить голос»."; else -> "Запись для калибровки идёт. Метка: " + (if (pendingCalibrationSameSpeaker == true) "мой голос" else "другой человек") + ". После записи нажмите «Сравнить голос»." }
             } catch (e: Exception) {
                 runCatching { verificationCapture?.release() }
                 verificationCapture = null
@@ -570,6 +574,17 @@ fun SettingsScreen(vm: AppViewModel) {
                                     if (padResult.suspicious) "aasist_pad_suspicious" else "aasist_pad_not_flagged",
                                     "bonaFide=${"%.3f".format(java.util.Locale.US, padResult.bonaFideScore)}; spoof=${"%.3f".format(java.util.Locale.US, padResult.spoofScore)}"
                                 )
+                                val attackLabel = pendingPadAttack
+                                if (attackLabel != null) {
+                                    padEvaluationStore.add(padResult.bonaFideScore, attackLabel)
+                                    padEvaluationRevision++
+                                    val report = padEvaluationStore.report()
+                                    VoiceSecurityAudit.record(context, "aasist_pad_test_trial", "label=${if (attackLabel) "attack" else "live"}; bonaFide=${"%.3f".format(java.util.Locale.US, padResult.bonaFideScore)}")
+                                    verificationNotice = "Тест PAD: ${if (attackLabel) "атака" else "живая речь"}, bona-fide score ${"%.3f".format(java.util.Locale.US, padResult.bonaFideScore)}; " +
+                                        "решение ${if (padResult.suspicious) "ОТКЛОНЕНО" else "НЕ ОТКЛОНЕНО"}. Живых записей ${report.genuineCount}, атак ${report.attackCount}. " +
+                                        "FRR ${report.falseRejectRate?.let { "%.1f".format(java.util.Locale.US, it * 100) + "%" } ?: "н/д"}; FAR ${report.falseAcceptRate?.let { "%.1f".format(java.util.Locale.US, it * 100) + "%" } ?: "н/д"}. " + report.note
+                                    return@launch
+                                }
                                 check(!padResult.suspicious) {
                                     "AASIST обнаружил риск подделки (score=${"%.3f".format(java.util.Locale.US, padResult.bonaFideScore)}). Запишите новую фразу непосредственно в микрофон. Порог предварительный, возможны ложные отказы."
                                 }
@@ -624,11 +639,13 @@ fun SettingsScreen(vm: AppViewModel) {
                                 verificationFile?.delete()
                                 verificationFile = null
                                 verificationCapture = null
+                                pendingPadAttack = null
                                 verificationBusy = false
                             }
                         }
                     } else {
                         pendingCalibrationSameSpeaker = null
+                        pendingPadAttack = null
                         verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 },
@@ -666,6 +683,16 @@ fun SettingsScreen(vm: AppViewModel) {
             if (padBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (padNotice.isNotBlank()) Text(padNotice, style = MaterialTheme.typography.bodySmall)
             Text(if (padReady) "Статус PAD: модель установлена и проверена." else "Статус PAD: модель не установлена; проверка голоса недоступна.", style = MaterialTheme.typography.labelSmall, color = if (padReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+            Text("Полевой тест обученного PAD", style = MaterialTheme.typography.titleSmall)
+            Text("Проверяйте отдельно живую речь и воспроизведение через второй телефон/динамик. Для теста TTS, клонирования или voice conversion создайте/используйте аудио, на которое есть согласие. В тестовом режиме результат записывается даже если AASIST его отклоняет; аудио не сохраняется.", style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { pendingCalibrationSameSpeaker = null; pendingPadAttack = false; verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO) }, enabled = !verificationBusy && verificationCapture == null && padReady) { Text("Тест: живая речь") }
+                OutlinedButton(onClick = { pendingCalibrationSameSpeaker = null; pendingPadAttack = true; verificationMicPermission.launch(Manifest.permission.RECORD_AUDIO) }, enabled = !verificationBusy && verificationCapture == null && padReady) { Text("Тест: replay / TTS / clone") }
+            }
+            val padReport = remember(padEvaluationRevision) { padEvaluationStore.report() }
+            Text("Набор PAD: живая речь ${padReport.genuineCount}, атаки ${padReport.attackCount}; FRR ${padReport.falseRejectRate?.let { "%.1f".format(java.util.Locale.US, it * 100) + "%" } ?: "н/д"}; FAR ${padReport.falseAcceptRate?.let { "%.1f".format(java.util.Locale.US, it * 100) + "%" } ?: "н/д"}", style = MaterialTheme.typography.bodySmall)
+            Text(padReport.note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            OutlinedButton(onClick = { padEvaluationStore.clear(); padEvaluationRevision++ }, enabled = padEvaluationRevision > 0 && !verificationBusy) { Text("Очистить тест PAD") }
             Text("Калибровка на настоящих записях", style = MaterialTheme.typography.titleSmall)
             Text("Собирайте независимые записи: свои фразы с меткой «Мой голос» и добровольно предоставленные записи другого человека с меткой «Другой человек». Аудио после расчёта удаляется; сохраняются только метка и score. Не используйте синтезированные/пересланные записи как замену полноценному anti-spoof тестированию.", style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
