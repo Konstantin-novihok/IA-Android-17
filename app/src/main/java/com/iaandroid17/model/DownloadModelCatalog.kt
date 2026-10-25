@@ -68,7 +68,7 @@ class DownloadModelCatalog(context: Context) {
             DownloadModelEntry(
                 "qwen3_4b", "Qwen3 4B · Q4_K_M · баланс",
                 "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf",
-                true, true
+                false, true
             ),
             DownloadModelEntry(
                 "qwen3_1_7b", "Qwen3 1.7B · Q4_K_M · компактная",
