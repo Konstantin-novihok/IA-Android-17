@@ -37,7 +37,8 @@ class AntiSpoofingEngine(context: Context) : Closeable {
         check(session.outputNames.isNotEmpty()) { "Unexpected AASIST outputs" }
     }
 
-    fun score(pcm16: ByteArray): Result {
+    fun score(pcm16: ByteArray, threshold: Float = DEFAULT_BONAFIDE_THRESHOLD): Result {
+        require(threshold in 0.05f..0.95f) { "PAD threshold must be between 0.05 and 0.95." }
         require(pcm16.size >= 64_000 && pcm16.size % 2 == 0) { "AASIST needs at least 2 seconds of PCM16 mono 16 kHz audio." }
         val samplesTotal = pcm16.size / 2
         // Match reference preprocessing: first 64,600 samples, or tile short audio until full.
@@ -74,7 +75,7 @@ class AntiSpoofingEngine(context: Context) : Closeable {
                 val spoof = (a / sum).toFloat()
                 val bona = (b / sum).toFloat()
                 // Conservative default operating point. It is not calibrated for this phone/mic/locale.
-                val suspicious = bona < DEFAULT_BONAFIDE_THRESHOLD
+                val suspicious = bona < threshold
                 return Result(
                     bonaFideScore = bona,
                     spoofScore = spoof,
