@@ -26,6 +26,6 @@ class SpeakerEmbeddingMathTest {
         )
         val c = SpeakerEmbeddingMath.calibrate(trials)
         assertTrue(c.far == 0f && c.frr == 0f)
-        assertEquals(4, c.trials)
+        assertEquals(4L, c.trials.toLong())
     }
 }
