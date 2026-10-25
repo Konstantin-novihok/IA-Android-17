@@ -1,5 +1,11 @@
 package com.iaandroid17.ui
 
+import android.content.Intent
+import android.speech.RecognizerIntent
+import android.speech.tts.TextToSpeech
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalContext
+import java.util.Locale
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -43,6 +49,16 @@ import com.iaandroid17.engine.EngineState
 @Composable
 fun ChatScreen(vm: AppViewModel, onOpenSettings: () -> Unit) {
     var input by rememberSaveable { mutableStateOf("") }
+    val context = LocalContext.current
+    var ttsReady by remember { mutableStateOf(false) }
+    val tts = remember { TextToSpeech(context) { status -> ttsReady = status == TextToSpeech.SUCCESS } }
+    DisposableEffect(tts) { onDispose { tts.stop(); tts.shutdown() } }
+    val speechInput = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull().orEmpty()
+            if (spoken.isNotBlank()) input = listOf(input, spoken).filter { it.isNotBlank() }.joinToString(" ")
+        }
+    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) vm.addDocuments(uris)
     }
@@ -74,7 +90,7 @@ fun ChatScreen(vm: AppViewModel, onOpenSettings: () -> Unit) {
             contentPadding = PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(vm.messages.asReversed(), key = { it.id }) { m -> MessageBubble(m) }
+            items(vm.messages.asReversed(), key = { it.id }) { m -> MessageBubble(m, onSpeak = { text -> if (ttsReady) { tts.language = Locale.getDefault(); tts.speak(text.take(6000), TextToSpeech.QUEUE_FLUSH, null, "ia-chat") } else vm.banner = "Синтез речи недоступен: проверьте TTS-движок Android." }) }
             if (vm.messages.isEmpty()) {
                 item(key = "hint") { EmptyHint() }
             }
@@ -89,6 +105,15 @@ fun ChatScreen(vm: AppViewModel, onOpenSettings: () -> Unit) {
         }
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.Bottom) {
             TextButton(onClick = { picker.launch(arrayOf("*/*")) }) { Text("📎") }
+            TextButton(onClick = {
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                    putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                }
+                runCatching { speechInput.launch(intent) }.onFailure { vm.banner = "Распознавание недоступно: " + (it.message ?: "ошибка") }
+            }) { Text("🎙") }
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
@@ -156,7 +181,7 @@ private fun EngineStatusCard(vm: AppViewModel, onOpenSettings: () -> Unit) {
 }
 
 @Composable
-private fun MessageBubble(m: UiMessage) {
+private fun MessageBubble(m: UiMessage, onSpeak: (String) -> Unit) {
     val isUser = m.role == Role.USER
     val parsed = remember(m.raw) { ChatFormat.parse(m.raw) }
     var showThinking by remember { mutableStateOf(false) }
@@ -188,6 +213,7 @@ private fun MessageBubble(m: UiMessage) {
                 val body = if (isUser || m.error) m.raw else parsed.answer
                 if (body.isNotBlank()) {
                     SelectionContainer { Text(body, style = MaterialTheme.typography.bodyMedium) }
+                    if (!isUser && !m.error) TextButton(onClick = { onSpeak(body) }) { Text("Озвучить") }
                 } else if (m.streaming) {
                     Text(if (parsed.thinkingOpen) "Думаю…" else "…", style = MaterialTheme.typography.bodyMedium)
                     LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp))
